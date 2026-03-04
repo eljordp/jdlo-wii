@@ -136,35 +136,32 @@ export default function WiiApp() {
       <div className="h-full w-full flex flex-col" style={{ background: theme.bg }}>
 
         {/* Channel Grid */}
-        <div className="flex-1 flex items-center justify-center px-6 md:px-12 pb-20 md:pb-28 pt-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 w-full max-w-[640px]">
+        <div className="flex-1 flex items-center justify-center px-4 md:px-16 pb-20 md:pb-28 pt-4 md:pt-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 w-full max-w-[1100px]">
             {channelTiles.map((tile, i) => (
               <motion.button
                 key={tile.id}
                 initial={{ opacity: 0, y: 30, scale: 0.8 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ delay: 0.1 + i * 0.08, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                className="channel-tile flex flex-col items-center justify-center gap-2 md:gap-3"
-                style={{
-                  animation: `wii-float 3s ease-in-out infinite`,
-                  animationDelay: `${i * 0.25}s`,
-                }}
+                className="channel-tile flex flex-col items-center justify-center gap-3 md:gap-4"
                 onClick={() => setOpenChannel(tile.id)}
               >
                 {tile.icon === 'profile' ? (
                   <img
                     src={PROFILE_PHOTO}
                     alt="Profile"
-                    className="w-12 h-12 md:w-16 md:h-16 rounded-full object-cover border-[3px] border-white/70 relative z-[3] shadow-md"
+                    className="w-16 h-20 md:w-20 md:h-24 object-cover object-top relative z-[3] drop-shadow-md"
+                    style={{ borderRadius: '4px' }}
                   />
                 ) : (
-                  <span className="text-3xl md:text-5xl relative z-[3] drop-shadow-sm">{tile.icon}</span>
+                  <span className="text-5xl md:text-7xl relative z-[3] drop-shadow-md">{tile.icon}</span>
                 )}
                 <span
-                  className="text-[9px] md:text-[11px] font-bold tracking-wider relative z-[3] uppercase"
+                  className="text-[9px] md:text-[11px] font-bold tracking-wider relative z-[3]"
                   style={{
-                    color: '#6b7a8a',
-                    textShadow: '0 1px 0 rgba(255,255,255,0.6)',
+                    color: '#7a8a96',
+                    textShadow: '0 1px 0 rgba(255,255,255,0.7)',
                     ...(isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : {}),
                   }}
                 >
@@ -226,9 +223,15 @@ export default function WiiApp() {
         </div>
 
         {/* Right chevron (desktop) — like the Wii page arrow */}
-        <div className="hidden md:flex fixed right-0 top-1/2 -translate-y-1/2 z-30 cursor-pointer group">
-          <div className="w-8 h-24 rounded-l-xl flex items-center justify-center transition-colors" style={{ background: 'rgba(200,210,220,0.3)' }}>
-            <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 transition-colors" />
+        <div className="hidden md:flex fixed right-2 top-1/2 -translate-y-1/2 z-30 cursor-pointer group">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center transition-all group-hover:scale-110"
+            style={{
+              background: 'linear-gradient(180deg, rgba(220,230,240,0.6) 0%, rgba(200,215,228,0.6) 100%)',
+              border: '1.5px solid rgba(255,255,255,0.5)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            }}
+          >
+            <ChevronRight className="w-5 h-5 text-gray-400/70 group-hover:text-gray-500 transition-colors" />
           </div>
         </div>
       </div>

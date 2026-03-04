@@ -13,8 +13,8 @@ export const themes: WiiTheme[] = [
   {
     id: 'light',
     name: 'Classic Light',
-    bg: 'linear-gradient(180deg, #e8f4f8 0%, #d0e8f0 50%, #b8dce8 100%)',
-    barBg: 'linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(200,230,245,0.95) 100%)',
+    bg: 'linear-gradient(180deg, #dfe9f0 0%, #d2e0ea 40%, #c8d8e4 100%)',
+    barBg: 'linear-gradient(180deg, rgba(245,248,252,0.97) 0%, rgba(220,232,242,0.97) 100%)',
     textColor: '#888',
     icon: '☀️',
     description: 'The original Wii experience',
