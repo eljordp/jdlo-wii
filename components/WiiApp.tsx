@@ -144,9 +144,8 @@ export default function WiiApp() {
                 initial={{ opacity: 0, y: 30, scale: 0.8 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ delay: 0.1 + i * 0.08, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                className="channel-tile flex flex-col items-center justify-center gap-2 md:gap-3 shadow-[0_8px_32px_rgba(0,0,0,0.2)]"
+                className="channel-tile flex flex-col items-center justify-center gap-2 md:gap-3"
                 style={{
-                  background: tile.gradient,
                   animation: `wii-float 3s ease-in-out infinite`,
                   animationDelay: `${i * 0.25}s`,
                 }}
@@ -156,14 +155,18 @@ export default function WiiApp() {
                   <img
                     src={PROFILE_PHOTO}
                     alt="Profile"
-                    className="w-12 h-12 md:w-16 md:h-16 rounded-full object-cover border-[3px] border-white/60 relative z-[3] shadow-lg"
+                    className="w-12 h-12 md:w-16 md:h-16 rounded-full object-cover border-[3px] border-white/70 relative z-[3] shadow-md"
                   />
                 ) : (
-                  <span className="text-3xl md:text-5xl relative z-[3] drop-shadow-lg">{tile.icon}</span>
+                  <span className="text-3xl md:text-5xl relative z-[3] drop-shadow-sm">{tile.icon}</span>
                 )}
                 <span
-                  className="text-white text-[9px] md:text-[11px] font-bold tracking-wider relative z-[3] drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)] uppercase"
-                  style={isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : undefined}
+                  className="text-[9px] md:text-[11px] font-bold tracking-wider relative z-[3] uppercase"
+                  style={{
+                    color: '#6b7a8a',
+                    textShadow: '0 1px 0 rgba(255,255,255,0.6)',
+                    ...(isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : {}),
+                  }}
                 >
                   {tile.name}
                 </span>
@@ -174,31 +177,36 @@ export default function WiiApp() {
 
         {/* ═══════ BOTTOM BAR ═══════ */}
         <div
-          className="fixed bottom-0 left-0 right-0 h-[72px] md:h-[96px] rounded-t-[28px] flex items-center justify-between px-5 md:px-10 z-40 shadow-[0_-4px_30px_rgba(0,0,0,0.1)]"
+          className="fixed bottom-0 left-0 right-0 h-[72px] md:h-[96px] rounded-t-[28px] flex items-center justify-between px-5 md:px-10 z-40"
           style={{
             background: theme.barBg,
-            borderTop: '1px solid rgba(255,255,255,0.25)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
+            borderTop: '1px solid rgba(255,255,255,0.4)',
+            boxShadow: '0 -1px 12px rgba(0,0,0,0.06)',
           }}
         >
           {/* Wii Button */}
-          <div className="w-11 h-11 md:w-[56px] md:h-[56px] rounded-full flex items-center justify-center shadow-[inset_0_-2px_4px_rgba(0,0,0,0.1),0_2px_8px_rgba(0,0,0,0.1)]"
-            style={{ background: 'linear-gradient(180deg, #f0f0f0 0%, #d8d8d8 100%)', border: '2px solid #c0c0c0' }}>
-            <span className="font-black text-[11px] md:text-[13px] text-gray-500 tracking-tight" style={{ fontFamily: "'Arial Black', sans-serif" }}>
+          <button
+            className="w-11 h-11 md:w-[52px] md:h-[52px] rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
+            style={{
+              background: 'linear-gradient(180deg, #f5f5f5 0%, #e0e0e0 100%)',
+              border: '2px solid #c8c8c8',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8), inset 0 -1px 3px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.1)',
+            }}
+          >
+            <span className="font-black text-[11px] md:text-[13px] text-gray-500 tracking-tight select-none" style={{ fontFamily: "'Arial Black', sans-serif" }}>
               Wii
             </span>
-          </div>
+          </button>
 
           {/* Clock */}
           <div className="text-center">
             <div
-              className="text-2xl md:text-4xl font-bold tracking-tight leading-none"
+              className="text-3xl md:text-[42px] font-bold tracking-tight leading-none"
               style={{ color: theme.textColor, fontFamily: isPokemon ? "'Press Start 2P'" : "'Arial', sans-serif" }}
             >
               {fmt(time)}
             </div>
-            <div className="text-[10px] md:text-xs mt-0.5 opacity-60 tracking-wide" style={{ color: theme.textColor }}>
+            <div className="text-[10px] md:text-xs mt-1 opacity-50 tracking-wide font-medium" style={{ color: theme.textColor }}>
               {fmtDate(time)}
             </div>
           </div>
@@ -206,20 +214,21 @@ export default function WiiApp() {
           {/* Mail Button */}
           <button
             onClick={() => setContactOpen(true)}
-            className="w-11 h-11 md:w-[56px] md:h-[56px] rounded-full flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 shadow-[0_2px_12px_rgba(59,130,246,0.3)]"
+            className="w-11 h-11 md:w-[52px] md:h-[52px] rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
             style={{
-              background: 'linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%)',
-              border: '2px solid rgba(255,255,255,0.35)',
+              background: 'linear-gradient(180deg, #f5f5f5 0%, #e0e0e0 100%)',
+              border: '2px solid #c8c8c8',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8), inset 0 -1px 3px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.1)',
             }}
           >
-            <span className="text-lg md:text-xl">📧</span>
+            <Mail className="w-5 h-5 md:w-6 md:h-6 text-gray-400" />
           </button>
         </div>
 
-        {/* Right chevron (desktop) */}
-        <div className="hidden md:flex fixed right-0 top-1/2 -translate-y-1/2 z-30">
-          <div className="w-7 h-20 rounded-l-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)' }}>
-            <ChevronRight className="w-4 h-4 text-white/40" />
+        {/* Right chevron (desktop) — like the Wii page arrow */}
+        <div className="hidden md:flex fixed right-0 top-1/2 -translate-y-1/2 z-30 cursor-pointer group">
+          <div className="w-8 h-24 rounded-l-xl flex items-center justify-center transition-colors" style={{ background: 'rgba(200,210,220,0.3)' }}>
+            <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 transition-colors" />
           </div>
         </div>
       </div>
