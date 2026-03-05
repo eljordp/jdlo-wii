@@ -1,67 +1,92 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronLeft, Server, Database, Code, Cloud, Lock, Zap, Lightbulb } from 'lucide-react';
+import { ChevronLeft, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import type { WiiTheme } from '@/lib/themes';
 
 interface Props { onBack: () => void; theme: WiiTheme }
 
-const sections = [
+interface FAQ {
+  id: number;
+  question: string;
+  answer: string;
+  category: string;
+}
+
+const faqs: FAQ[] = [
   {
-    id: 'how-i-build', name: 'How I Build', icon: Server,
-    cards: [
-      { title: 'Everything Connects', text: 'I build your tools so they talk to each other. Your website, your CRM, your emails, your payments — all one system, not ten separate things you have to manage.' },
-      { title: 'Built to Grow With You', text: 'Start small, scale up. Nothing I build will break when your business takes off. You won\'t need to rebuild from scratch when you double in size.' },
-      { title: 'It Works While You Sleep', text: 'New lead comes in? They get a response. Appointment booked? Your calendar updates. Invoice due? It sends itself. I set up the automations so you\'re not glued to your phone.' },
-    ],
-    callout: 'You shouldn\'t have to be the one holding everything together. I build the machine so you can step back and actually run your business.',
+    id: 1, category: 'Pricing',
+    question: 'How much does a website cost?',
+    answer: 'Depends on what you need. A simple landing page starts around $300-$800. A full multi-page site with forms, blog, and SEO runs $1,200-$1,800. Need e-commerce, booking systems, or custom features? That\'s $2,000-$3,500. Check the Wii Shop for exact pricing on every service.',
   },
   {
-    id: 'your-data', name: 'Your Data', icon: Database,
-    cards: [
-      { title: 'One Source of Truth', text: 'No more checking three different apps to figure out what\'s going on. Everything lives in one place — your leads, your sales, your numbers. Clean and simple.' },
-      { title: 'No More Manual Entry', text: 'Stop copying and pasting between spreadsheets. Your data moves between tools automatically. Less busy work, fewer mistakes, more time for what matters.' },
-      { title: 'See What\'s Working', text: 'You\'ll know exactly where your money is coming from, which marketing is actually working, and where people are dropping off. Real numbers, not guessing.' },
-    ],
-    callout: 'If you\'re making decisions based on gut feelings instead of real numbers, you\'re leaving money on the table. I fix that.',
+    id: 2, category: 'Pricing',
+    question: 'Do you offer payment plans?',
+    answer: 'Yes. I require a down payment upfront (usually 50%) and then we can split the rest into payments. I\'m flexible, but I\'m strict — if you miss a payment, work pauses. No hard feelings, just business.',
   },
   {
-    id: 'speed', name: 'Speed to Launch', icon: Code,
-    cards: [
-      { title: 'Live in Weeks, Not Months', text: 'I don\'t do 6-month projects that never see the light of day. We get something real in front of people fast, see what works, and improve from there.' },
-      { title: 'Nothing Gets Lost', text: 'Every change I make is tracked and can be undone. You\'ll never hear "oops, I broke it and can\'t fix it." Your project stays clean and organized.' },
-      { title: 'Updates Go Live Instantly', text: 'When we make a change, it goes live in minutes — not days. No waiting around, no back-and-forth with hosting companies.' },
-    ],
-    callout: 'Done is better than perfect. I get you live fast so you can start making money, then we fine-tune from there.',
+    id: 3, category: 'Process',
+    question: 'How long does it take?',
+    answer: 'Most projects go live in 1-4 weeks depending on the scope. A simple site? 1-2 weeks. A full app? 4-8 weeks. I don\'t do 6-month projects that never launch. We move fast, get it live, and improve from there.',
   },
   {
-    id: 'always-on', name: 'Always Online', icon: Cloud,
-    cards: [
-      { title: 'Fast Everywhere', text: 'Your site loads quick whether someone\'s in LA, New York, or Tokyo. Nobody\'s waiting around for your page to show up.' },
-      { title: 'No Downtime', text: 'Updates happen without your site going offline. Your customers never see a "we\'ll be right back" page. Ever.' },
-      { title: 'Handles the Rush', text: 'Run a big promo? Go viral? Your site handles it. No crashing when traffic spikes — you\'ll never miss a sale because your site went down.' },
-    ],
-    callout: 'Every minute your site is down or slow, you\'re losing real money. I make sure that doesn\'t happen.',
+    id: 4, category: 'Getting Started',
+    question: 'What do I need to get started?',
+    answer: 'Not much. I just need to know what your business does, who your customers are, and what you want the site/system to accomplish. If you have a logo, brand colors, or content ready — great. If not, I can help with that too.',
   },
   {
-    id: 'safe', name: 'Keeping It Safe', icon: Lock,
-    cards: [
-      { title: 'Your Customers\' Info Is Protected', text: 'All the personal info, payments, and data on your site is locked down tight. Your customers can trust you with their information.' },
-      { title: 'The Right People See the Right Things', text: 'Your team sees what they need, and nothing they don\'t. No accidental access to sensitive stuff. Everything is set up with proper permissions.' },
-      { title: 'Problems Caught Early', text: 'I set up automatic checks that catch security issues before they become real problems. Prevention, not damage control.' },
-    ],
-    callout: 'One data breach can kill a small business\'s reputation. I build security in from day one so you don\'t have to worry about it.',
+    id: 5, category: 'Getting Started',
+    question: 'Can you help with my existing site?',
+    answer: 'Absolutely. Whether it needs a redesign, speed improvements, SEO fixes, or new features — I can work with what you have. Sometimes a refresh is all you need, not a full rebuild.',
   },
   {
-    id: 'fast', name: 'Making It Fast', icon: Zap,
-    cards: [
-      { title: 'Google Loves Fast Sites', text: 'Your site scores high on Google\'s speed test. That means better search rankings, more people finding you, and more of them actually sticking around.' },
-      { title: 'Everything Loads Quick', text: 'Images, videos, pages — all optimized so nothing takes forever to load. People are impatient. If your site is slow, they bounce.' },
-      { title: 'Repeat Visitors Get Instant Loads', text: 'Once someone visits your site, the next time they come back it loads almost instantly. That\'s the kind of experience that keeps people coming back.' },
-    ],
-    callout: 'Every extra second your site takes to load, you lose about 7% of potential customers. I make your site fly.',
+    id: 6, category: 'Process',
+    question: 'How do we communicate during the project?',
+    answer: 'However works best for you — text, email, Slack, or calls. I keep things simple. You\'ll get regular updates, and I won\'t ghost you. If I need something from you, I\'ll ask directly. No runaround.',
+  },
+  {
+    id: 7, category: 'Process',
+    question: 'What if I don\'t like the design?',
+    answer: 'Every tier includes revision rounds. Starter gets 1-2 rounds, Professional gets 3-4, and Enterprise gets unlimited. I work with your feedback at every step — you\'re never stuck with something you don\'t love.',
+  },
+  {
+    id: 8, category: 'After Launch',
+    question: 'What happens after my site goes live?',
+    answer: 'I don\'t just build it and disappear. You get support after launch to fix any issues. If you want ongoing maintenance, updates, or marketing help — we can set that up too. Most clients stick around because things keep working.',
+  },
+  {
+    id: 9, category: 'After Launch',
+    question: 'How do I know if it\'s actually working?',
+    answer: 'I set up tracking so you can see real numbers — how many people visit, where they come from, what they click, and how many turn into leads or sales. No guessing. You\'ll have a dashboard with everything.',
+  },
+  {
+    id: 10, category: 'Services',
+    question: 'Do you do branding and logos too?',
+    answer: 'Yes. Logo design, color palettes, brand guidelines, social media templates — the whole thing. I can do just the brand kit, or bundle it with your website build for a better deal.',
+  },
+  {
+    id: 11, category: 'Services',
+    question: 'What\'s an AI Receptionist?',
+    answer: 'It\'s like having a virtual front desk person who never sleeps. It answers calls and chats on your website, qualifies leads by asking the right questions, books appointments on your calendar, and sends you notifications. All automatic, 24/7.',
+  },
+  {
+    id: 12, category: 'Services',
+    question: 'Can you set up my automations and CRM?',
+    answer: 'That\'s literally what I do best. Email sequences, lead follow-ups, appointment reminders, invoice sending — if you\'re doing it manually and it\'s eating your time, I can automate it.',
+  },
+  {
+    id: 13, category: 'Getting Started',
+    question: 'I have no idea what I need. Can you just tell me?',
+    answer: 'Yes. That\'s what the Consultation service is for. We hop on a call, I look at where your business is, and I tell you exactly what would make the biggest impact. No fluff, just a clear game plan.',
+  },
+  {
+    id: 14, category: 'Pricing',
+    question: 'Why should I pay you instead of using a template?',
+    answer: 'Templates work fine if you just need a placeholder. But if you want something that actually converts visitors into customers, loads fast, ranks on Google, and doesn\'t look like everyone else\'s site — that\'s where I come in. You\'re not paying for a page, you\'re paying for a system that makes you money.',
   },
 ];
+
+const categories = ['All', 'Getting Started', 'Pricing', 'Process', 'Services', 'After Launch'];
 
 const cardStyle = {
   background: 'linear-gradient(180deg, #dbe7ef 0%, #cddae4 50%, #c4d4e0 100%)',
@@ -69,19 +94,19 @@ const cardStyle = {
   boxShadow: '0 2px 6px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.5)',
 };
 
-const innerCard = {
-  background: 'linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.2) 100%)',
-  border: '1.5px solid rgba(255,255,255,0.7)',
-  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-};
-
 export default function InternetChannel({ onBack }: Props) {
-  const [active, setActive] = useState(sections[0].id);
-  const section = sections.find(s => s.id === active)!;
-  const SectionIcon = section.icon;
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('All');
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  const filtered = faqs.filter(f => {
+    const matchesCat = category === 'All' || f.category === category;
+    const matchesQuery = query === '' || f.question.toLowerCase().includes(query.toLowerCase()) || f.answer.toLowerCase().includes(query.toLowerCase());
+    return matchesCat && matchesQuery;
+  });
 
   return (
-    <div className="h-full w-full flex flex-col" style={{ background: 'linear-gradient(180deg, #dceef6 0%, #c4dfe9 100%)' }}>
+    <div className="h-full w-full flex flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg, #dceef6 0%, #c4dfe9 100%)' }}>
       {/* Header */}
       <div className="px-4 md:px-6 pt-4 pb-2">
         <button
@@ -92,77 +117,96 @@ export default function InternetChannel({ onBack }: Props) {
         </button>
       </div>
 
-      <div className="px-4 md:px-6 pb-2">
-        <h1 className="text-gray-700 font-bold text-xl">🌐 How I Work</h1>
+      <div className="px-4 md:px-6 pb-3">
+        <h1 className="text-gray-700 font-bold text-xl mb-3">🌐 Internet Channel</h1>
+
+        {/* Search Bar */}
+        <div
+          className="flex items-center gap-2.5 px-4 py-3 rounded-2xl"
+          style={{
+            background: 'linear-gradient(180deg, #e8eff5 0%, #dbe5ed 100%)',
+            border: '2.5px solid rgba(255,255,255,0.9)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -1px 3px rgba(0,0,0,0.03)',
+          }}
+        >
+          <Search className="w-4 h-4 text-gray-400 shrink-0" />
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search anything..."
+            className="flex-1 bg-transparent outline-none text-gray-700 text-sm font-medium placeholder:text-gray-400"
+          />
+          {query && (
+            <button onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600 text-xs font-bold">
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar (desktop) */}
-        <div className="hidden md:flex flex-col w-56 shrink-0 overflow-auto p-3 gap-1.5">
-          {sections.map(s => {
-            const Icon = s.icon;
-            return (
+      {/* Category Pills */}
+      <div className="px-4 md:px-6 pb-3 flex flex-wrap gap-2">
+        {categories.map(c => (
+          <button
+            key={c}
+            onClick={() => setCategory(c)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              category === c
+                ? 'bg-white text-gray-700 shadow-md'
+                : 'bg-white/40 text-gray-500 hover:bg-white/60'
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {/* Results */}
+      <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
+        {query && (
+          <p className="text-gray-400 text-xs font-semibold mb-3">
+            {filtered.length} result{filtered.length !== 1 ? 's' : ''} {query && `for "${query}"`}
+          </p>
+        )}
+
+        <div className="space-y-2.5 max-w-2xl">
+          {filtered.map(faq => (
+            <div key={faq.id} className="rounded-2xl overflow-hidden" style={cardStyle}>
               <button
-                key={s.id}
-                onClick={() => setActive(s.id)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-left text-xs font-bold transition-all ${
-                  active === s.id ? 'bg-white text-gray-700 shadow-md' : 'text-gray-400 hover:text-gray-600 hover:bg-white/40'
-                }`}
+                onClick={() => setOpenId(openId === faq.id ? null : faq.id)}
+                className="w-full flex items-center justify-between gap-3 p-4 text-left"
               >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span>{s.name}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-gray-700 font-bold text-sm">{faq.question}</p>
+                  <p className="text-gray-400 text-[10px] font-bold uppercase tracking-wider mt-0.5">{faq.category}</p>
+                </div>
+                {openId === faq.id
+                  ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+                  : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                }
               </button>
-            );
-          })}
-        </div>
-
-        {/* Mobile pills */}
-        <div className="md:hidden px-4 pt-1 pb-2 shrink-0 flex flex-wrap gap-2">
-          {sections.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setActive(s.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                active === s.id ? 'bg-white text-gray-700 shadow-md' : 'bg-white/40 text-gray-500 hover:bg-white/60'
-              }`}
-            >
-              {s.name}
-            </button>
+              {openId === faq.id && (
+                <div className="px-4 pb-4">
+                  <div
+                    className="rounded-xl p-4"
+                    style={{
+                      background: 'linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.2) 100%)',
+                      border: '1.5px solid rgba(255,255,255,0.7)',
+                    }}
+                  >
+                    <p className="text-gray-500 text-sm leading-relaxed">{faq.answer}</p>
+                  </div>
+                </div>
+              )}
+            </div>
           ))}
-        </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
-          <div className="max-w-2xl space-y-4">
-            {/* Section Title */}
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center">
-                <SectionIcon className="w-4 h-4 text-gray-400" />
-              </div>
-              <h2 className="text-gray-700 font-bold text-base">{section.name}</h2>
+          {filtered.length === 0 && (
+            <div className="rounded-2xl p-8 text-center" style={cardStyle}>
+              <p className="text-gray-400 text-sm font-semibold">No results found. Try a different search.</p>
             </div>
-
-            {/* Cards */}
-            {section.cards.map((card, i) => (
-              <div key={i} className="rounded-2xl p-5" style={cardStyle}>
-                <h3 className="text-gray-700 font-bold text-sm mb-2">{card.title}</h3>
-                <p className="text-gray-400 text-sm leading-relaxed">{card.text}</p>
-              </div>
-            ))}
-
-            {/* Callout */}
-            <div className="rounded-2xl p-5" style={cardStyle}>
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/50 flex items-center justify-center shrink-0">
-                  <Lightbulb className="w-4 h-4 text-gray-400" />
-                </div>
-                <div>
-                  <h4 className="text-gray-700 font-bold text-xs uppercase tracking-wider mb-1">What This Means For You</h4>
-                  <p className="text-gray-500 text-sm leading-relaxed">{section.callout}</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
