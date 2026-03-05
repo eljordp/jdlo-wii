@@ -109,7 +109,7 @@ export default function WiiApp() {
               BEFORE PLAYING, READ YOUR OPERATIONS MANUAL FOR
               IMPORTANT INFORMATION ABOUT YOUR HEALTH AND SAFETY.
             </p>
-            <p className="text-gray-500 text-xs mb-1">Also available at</p>
+            <p className="text-white/70 text-xs mb-1">Also available at</p>
             <a
               href="https://jdlo.online"
               target="_blank"
