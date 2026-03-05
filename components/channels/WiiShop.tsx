@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronLeft, ChevronDown, Globe, Palette, Lightbulb, Rocket, Bot, Crane, Plug, LayoutGrid, Search, ShoppingCart, Filter, ArrowUpDown, Star, X } from 'lucide-react';
+import { ChevronLeft, ChevronDown, Globe, Palette, Lightbulb, Rocket, Bot, Construction, Plug, LayoutGrid, Search, ShoppingCart, Filter, ArrowUpDown, Star, X } from 'lucide-react';
 import type { WiiTheme } from '@/lib/themes';
 
 interface Props { onBack: () => void; theme: WiiTheme }
@@ -55,7 +55,7 @@ const services: Service[] = [
     id: 6, name: 'System Architecture', emoji: '🏗️', category: 'Automation', price: 7500,
     desc: 'The blueprint for your app to work perfectly.',
     detail: 'Complete system design — database schemas, API architecture, infrastructure planning, CI/CD pipelines, and technical documentation. Built for scale from day one.',
-    color: '#f97316', colorDark: '#ea580c', icon: Crane, popular: false,
+    color: '#f97316', colorDark: '#ea580c', icon: Construction, popular: false,
   },
   {
     id: 7, name: 'Brand Identity', emoji: '🔌', category: 'Branding', price: 1200,
