@@ -99,13 +99,13 @@ export default function WiiApp() {
               </div>
             </div>
 
-            <h1 className="text-white text-lg md:text-2xl font-bold tracking-[0.3em] mb-8 uppercase">
+            <h1 className="text-white text-xl md:text-3xl font-black tracking-[0.3em] mb-8 uppercase">
               <span style={{ animation: 'pulse-opacity 2s ease-in-out infinite' }}>⚠</span>
               <span className="mx-3">WARNING</span>
               <span style={{ animation: 'pulse-opacity 2s ease-in-out infinite 0.5s' }}>⚠</span>
             </h1>
 
-            <p className="text-gray-300 text-sm md:text-base max-w-xl mb-8 leading-relaxed tracking-wide">
+            <p className="text-gray-300 text-base md:text-lg font-semibold max-w-xl mb-8 leading-relaxed tracking-wide">
               BEFORE PLAYING, READ YOUR OPERATIONS MANUAL FOR
               IMPORTANT INFORMATION ABOUT YOUR HEALTH AND SAFETY.
             </p>
