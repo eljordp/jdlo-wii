@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
+@keyframes wii-float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-5px); }
+}
+
 @keyframes pulse-opacity {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
