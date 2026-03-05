@@ -19,6 +19,23 @@ const sports = [
   { id: 'arcade' as Sport, name: 'Arcade', emoji: '🕹️', color: 'from-purple-600 to-purple-800' },
 ];
 
+// Fielder positions (canvas coords W=600, H=420)
+const FIELDERS = [
+  { x: 300, y: 350, label: 'C' },
+  { x: 415, y: 228, label: '1B' },
+  { x: 358, y: 168, label: '2B' },
+  { x: 242, y: 168, label: 'SS' },
+  { x: 185, y: 228, label: '3B' },
+  { x: 130, y: 115, label: 'LF' },
+  { x: 300, y: 88, label: 'CF' },
+  { x: 470, y: 115, label: 'RF' },
+];
+const BASE_POS = [
+  { x: 410, y: 0.53 },  // 1B
+  { x: 300, y: 0.32 },  // 2B
+  { x: 190, y: 0.53 },  // 3B
+];
+
 // ═══════ BASEBALL (Canvas) ═══════
 function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -27,17 +44,19 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
   const maxInnings = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 5 : 9;
   const sweetSpot = difficulty === 'easy' ? 0.18 : difficulty === 'medium' ? 0.12 : 0.08;
   const pitchSpd = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.016 : 0.022;
-  const cpuHitRate = difficulty === 'easy' ? 0.22 : difficulty === 'medium' ? 0.33 : 0.45;
+  const cpuContact = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.5 : 0.65;
 
   const gRef = useRef({
-    phase: 'idle' as 'idle' | 'pitch' | 'swing' | 'hit_fly' | 'result',
+    phase: 'idle' as 'idle' | 'pitch' | 'hit_fly' | 'result',
     timer: 60, ballZ: 0, ballTargetX: 0,
     swingAnim: 0, pitchAnim: 0,
     hitBallT: 0, hitDestX: 0, hitDestY: 0,
     resultText: '', resultColor: '#fff',
     strikes: 0, balls: 0, outs: 0, inning: 1,
     playerScore: 0, cpuScore: 0, batting: true, gameOver: false,
-    clicked: false,
+    bases: [false, false, false] as boolean[],
+    clicked: false, cpuDecided: false, cpuSwingZ: 0.8,
+    activeFielder: -1, fielderAnimT: 0,
   });
 
   useEffect(() => {
@@ -49,15 +68,55 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
     const g = gRef.current;
     let raf: number;
 
+    const syncHud = (msg: string) => {
+      setHud({ player: g.playerScore, cpu: g.cpuScore, inning: g.inning, outs: g.outs, strikes: g.strikes, balls: g.balls, batting: g.batting, gameOver: g.gameOver, message: msg });
+    };
+
     const startPitch = () => {
       g.phase = 'pitch'; g.ballZ = 0; g.swingAnim = 0; g.pitchAnim = 1;
       g.ballTargetX = W / 2 + (Math.random() - 0.5) * 70;
-      g.clicked = false;
+      g.clicked = false; g.cpuDecided = false;
+      g.cpuSwingZ = 0.62 + Math.random() * 0.25;
     };
 
     const showResult = (text: string, color = '#fff') => {
       g.resultText = text; g.resultColor = color;
-      g.phase = 'result'; g.timer = 50;
+      g.phase = 'result'; g.timer = 55;
+    };
+
+    // Runner advancement: 1=single, 2=double, 3=triple, 4=HR
+    const advanceRunners = (forward: number): number => {
+      let runs = 0;
+      const nb: boolean[] = [false, false, false];
+      for (let i = 2; i >= 0; i--) {
+        if (g.bases[i]) { const d = i + forward; if (d >= 3) runs++; else nb[d] = true; }
+      }
+      if (forward >= 4) runs++; else nb[forward - 1] = true;
+      g.bases = nb;
+      return runs;
+    };
+
+    const walkRunners = (): number => {
+      let runs = 0;
+      if (g.bases[0] && g.bases[1] && g.bases[2]) runs++;
+      if (g.bases[0] && g.bases[1]) g.bases[2] = true;
+      if (g.bases[0]) g.bases[1] = true;
+      g.bases[0] = true;
+      return runs;
+    };
+
+    const advanceOut = () => {
+      g.outs++;
+      if (g.outs >= 3) {
+        g.outs = 0; g.strikes = 0; g.balls = 0;
+        g.bases = [false, false, false];
+        if (!g.batting) {
+          if (g.inning >= maxInnings) { g.gameOver = true; return; }
+          g.inning++; g.batting = true;
+        } else {
+          g.batting = false;
+        }
+      }
     };
 
     const advanceCount = (isStrike: boolean) => {
@@ -66,101 +125,90 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         if (g.strikes >= 3) {
           g.strikes = 0; g.balls = 0;
           advanceOut();
-          showResult('STRIKEOUT!', '#ff6b6b');
-          syncHud('Strikeout!');
+          showResult(g.gameOver ? 'GAME OVER' : 'STRIKEOUT!', g.gameOver ? '#ffdd57' : '#ff6b6b');
+          syncHud(g.gameOver ? 'Game Over!' : 'Strikeout!');
           return;
         }
       } else {
         g.balls++;
         if (g.balls >= 4) {
           g.balls = 0; g.strikes = 0;
-          if (g.batting) g.playerScore++; else g.cpuScore++;
+          const runs = walkRunners();
+          if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
           showResult('WALK!', '#90ee90');
-          syncHud('Walk!');
+          syncHud(`Walk!${runs > 0 ? ` ${runs} scored!` : ''}`);
           return;
         }
       }
       g.phase = 'idle'; g.timer = 30;
-      syncHud(isStrike ? 'Strike!' : 'Ball');
+      syncHud(isStrike ? `Strike ${g.strikes}` : `Ball ${g.balls}`);
     };
 
-    const advanceOut = () => {
-      g.outs++;
-      if (g.outs >= 3) {
-        g.outs = 0; g.strikes = 0; g.balls = 0;
-        if (!g.batting) {
-          if (g.inning >= maxInnings) {
-            g.gameOver = true;
-            showResult('GAME OVER', '#ffdd57');
-            syncHud('Game Over!');
-            return;
-          }
-          g.inning++; g.batting = true;
-        } else {
-          g.batting = false;
-        }
+    const nearestFielder = (tx: number, ty: number, outfield: boolean): number => {
+      const start = outfield ? 5 : 0; const end = outfield ? 8 : 5;
+      let best = start, bestD = Infinity;
+      for (let i = start; i < end; i++) {
+        const dx = FIELDERS[i].x - tx, dy = FIELDERS[i].y - ty;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = i; }
       }
+      return best;
     };
 
-    const scoreRuns = (runs: number) => {
-      if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
-    };
-
-    const syncHud = (msg: string) => {
-      setHud({ player: g.playerScore, cpu: g.cpuScore, inning: g.inning, outs: g.outs, strikes: g.strikes, balls: g.balls, batting: g.batting, gameOver: g.gameOver, message: msg });
-    };
-
-    const processHit = (timing: number) => {
+    const processSwing = (timing: number, cpu: boolean) => {
+      g.swingAnim = 1;
       const quality = 1 - timing / sweetSpot;
       const r = Math.random();
+      const tag = cpu ? 'CPU ' : '';
       g.strikes = 0; g.balls = 0;
-      if (quality > 0.7 && r < 0.25) {
-        scoreRuns(Math.random() < 0.3 ? 2 : 1);
-        g.hitDestX = W / 2 + (Math.random() - 0.5) * 60;
-        g.hitDestY = -40;
-        g.resultText = 'HOME RUN!'; g.resultColor = '#ffdd57';
-        syncHud('HOME RUN!');
-      } else if (quality > 0.3 || r < 0.35) {
-        const rr = Math.random();
-        if (rr < 0.1) { scoreRuns(1); g.resultText = 'TRIPLE!'; g.resultColor = '#90ee90'; }
-        else if (rr < 0.35) { scoreRuns(Math.random() < 0.4 ? 1 : 0); g.resultText = 'DOUBLE!'; g.resultColor = '#87ceeb'; }
-        else { scoreRuns(Math.random() < 0.25 ? 1 : 0); g.resultText = 'BASE HIT!'; g.resultColor = '#fff'; }
-        g.hitDestX = W / 2 + (Math.random() - 0.5) * 250;
-        g.hitDestY = H * 0.1 + Math.random() * 80;
-        syncHud(g.resultText.replace('!', ''));
-      } else {
-        advanceOut();
-        g.hitDestX = W / 2 + (Math.random() - 0.5) * 180;
-        g.hitDestY = H * 0.2 + Math.random() * 40;
-        g.resultText = 'FLY OUT!'; g.resultColor = '#ff6b6b';
-        syncHud('Fly out!');
-      }
-      g.phase = 'hit_fly'; g.hitBallT = 0;
-    };
 
-    const cpuAtBat = () => {
-      g.strikes = 0; g.balls = 0;
-      if (Math.random() < cpuHitRate) {
-        const rr = Math.random();
-        if (rr < 0.04) { scoreRuns(Math.random() < 0.3 ? 2 : 1); g.resultText = 'CPU HOME RUN!'; g.resultColor = '#ff6b6b'; g.hitDestY = -40; }
-        else if (rr < 0.15) { scoreRuns(1); g.resultText = 'CPU TRIPLE!'; g.resultColor = '#ff9b6b'; g.hitDestY = H * 0.1; }
-        else if (rr < 0.35) { scoreRuns(Math.random() < 0.4 ? 1 : 0); g.resultText = 'CPU DOUBLE!'; g.resultColor = '#ffb86b'; g.hitDestY = H * 0.15; }
-        else { scoreRuns(Math.random() < 0.2 ? 1 : 0); g.resultText = 'CPU HIT!'; g.resultColor = '#fff'; g.hitDestY = H * 0.2; }
-        g.hitDestX = W / 2 + (Math.random() - 0.5) * 250;
-        g.phase = 'hit_fly'; g.hitBallT = 0;
-        syncHud(g.resultText.replace('!', ''));
-      } else if (Math.random() < 0.4) {
-        advanceOut();
-        g.hitDestX = W / 2 + (Math.random() - 0.5) * 150;
-        g.hitDestY = H * 0.2;
-        g.resultText = 'CPU OUT!'; g.resultColor = '#90ee90';
-        g.phase = 'hit_fly'; g.hitBallT = 0;
-        syncHud('CPU out!');
+      if (quality > 0.7 && r < 0.2) {
+        const runs = advanceRunners(4);
+        if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 100; g.hitDestY = -50;
+        g.activeFielder = -1;
+        g.resultText = `${tag}HOME RUN!`; g.resultColor = '#ffdd57';
+        syncHud(`${tag}HOME RUN! ${runs} run${runs !== 1 ? 's' : ''}!`);
+      } else if (quality > 0.5 && r < 0.12) {
+        const runs = advanceRunners(3);
+        if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
+        g.hitDestX = Math.random() < 0.5 ? 80 : W - 80; g.hitDestY = H * 0.08;
+        g.activeFielder = nearestFielder(g.hitDestX, g.hitDestY, true);
+        g.resultText = `${tag}TRIPLE!`; g.resultColor = '#90ee90';
+        syncHud(`${tag}Triple!${runs ? ` ${runs} scored!` : ''}`);
+      } else if (quality > 0.3 && r < 0.3) {
+        const runs = advanceRunners(2);
+        if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 280; g.hitDestY = H * 0.1 + Math.random() * 40;
+        g.activeFielder = nearestFielder(g.hitDestX, g.hitDestY, true);
+        g.resultText = `${tag}DOUBLE!`; g.resultColor = '#87ceeb';
+        syncHud(`${tag}Double!${runs ? ` ${runs} scored!` : ''}`);
+      } else if (quality > 0.1 || r < 0.35) {
+        const runs = advanceRunners(1);
+        if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 200; g.hitDestY = H * 0.15 + Math.random() * 60;
+        g.activeFielder = nearestFielder(g.hitDestX, g.hitDestY, Math.random() < 0.5);
+        g.resultText = `${tag}SINGLE!`; g.resultColor = '#fff';
+        syncHud(`${tag}Single!${runs ? ` ${runs} scored!` : ''}`);
       } else {
         advanceOut();
-        showResult('STRUCK OUT!', '#90ee90');
-        syncHud('CPU struck out!');
+        const ground = Math.random() < 0.5;
+        if (ground) {
+          g.hitDestX = W / 2 + (Math.random() - 0.5) * 150; g.hitDestY = H * 0.45 + Math.random() * 25;
+          g.activeFielder = nearestFielder(g.hitDestX, g.hitDestY, false);
+        } else {
+          g.hitDestX = W / 2 + (Math.random() - 0.5) * 200; g.hitDestY = H * 0.12 + Math.random() * 50;
+          g.activeFielder = nearestFielder(g.hitDestX, g.hitDestY, true);
+        }
+        if (g.gameOver) {
+          g.resultText = 'GAME OVER'; g.resultColor = '#ffdd57';
+          syncHud('Game Over!');
+        } else {
+          g.resultText = `${tag}${ground ? 'GROUND' : 'FLY'} OUT`; g.resultColor = '#ff6b6b';
+          syncHud(`${tag}${ground ? 'Ground' : 'Fly'} out!`);
+        }
       }
+      g.phase = 'hit_fly'; g.hitBallT = 0; g.fielderAnimT = 0;
     };
 
     const onClick = () => { g.clicked = true; };
@@ -171,55 +219,59 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
     g.phase = 'idle'; g.timer = 40;
     g.strikes = 0; g.balls = 0; g.outs = 0; g.inning = 1;
     g.playerScore = 0; g.cpuScore = 0; g.batting = true; g.gameOver = false;
+    g.bases = [false, false, false]; g.activeFielder = -1;
     syncHud('Step up to the plate!');
 
     const loop = () => {
-      // ── Update ──
+      // ── UPDATE ──
       if (g.phase === 'idle') {
         g.timer--;
-        if (g.timer <= 0) {
-          if (g.gameOver) return;
-          if (!g.batting) { cpuAtBat(); }
-          else startPitch();
-        }
+        if (g.timer <= 0 && !g.gameOver) startPitch();
       } else if (g.phase === 'pitch') {
         g.ballZ += pitchSpd;
         g.pitchAnim = Math.max(0, g.pitchAnim - 0.04);
+        // Player swing
         if (g.batting && g.clicked) {
           g.clicked = false;
-          g.swingAnim = 1;
           const timing = Math.abs(g.ballZ - 0.82);
-          if (timing < sweetSpot) {
-            processHit(timing);
-          } else if (timing < sweetSpot * 2.5) {
+          if (timing < sweetSpot) { processSwing(timing, false); }
+          else if (timing < sweetSpot * 2.5 && g.ballZ > 0.3) {
+            g.swingAnim = 1;
             if (g.strikes < 2) g.strikes++;
             g.phase = 'idle'; g.timer = 25;
-            syncHud('Foul ball!');
-          } else {
-            advanceCount(true);
+            syncHud(`Foul ball! (${g.strikes}-${g.balls})`);
+          } else { g.swingAnim = 1; advanceCount(true); }
+        }
+        // CPU swing
+        if (!g.batting && !g.cpuDecided && g.ballZ >= g.cpuSwingZ) {
+          g.cpuDecided = true;
+          if (Math.random() < cpuContact) {
+            processSwing(Math.random() * sweetSpot * 1.5, true);
+          } else if (Math.random() < 0.5) {
+            g.swingAnim = 1; advanceCount(true);
           }
         }
+        // Ball reaches plate
         if (g.ballZ >= 1.0 && g.phase === 'pitch') {
           const inZone = Math.abs(g.ballTargetX - W / 2) < 35;
           advanceCount(inZone);
         }
       } else if (g.phase === 'hit_fly') {
-        g.hitBallT += 0.018;
-        if (g.hitBallT >= 1) {
-          g.phase = 'result'; g.timer = 55;
-        }
+        g.hitBallT += 0.016;
+        g.fielderAnimT = Math.min(1, g.fielderAnimT + 0.018);
+        if (g.hitBallT >= 1) { g.phase = 'result'; g.timer = 60; g.activeFielder = -1; }
       } else if (g.phase === 'result') {
         g.timer--;
         if (g.timer <= 0) {
           if (g.gameOver) { syncHud('Game Over!'); return; }
-          g.phase = 'idle'; g.timer = g.batting ? 35 : 25;
-          syncHud(g.batting ? 'You\'re batting!' : 'CPU at bat...');
+          g.phase = 'idle'; g.timer = g.batting ? 40 : 28;
+          syncHud(g.batting ? 'You\'re up!' : 'CPU at bat...');
         }
       }
-      g.swingAnim = Math.max(0, g.swingAnim - 0.06);
+      g.swingAnim = Math.max(0, g.swingAnim - 0.05);
 
-      // ── Draw ──
-      // Sky gradient
+      // ── DRAW ──
+      // Sky
       const sky = ctx.createLinearGradient(0, 0, 0, H * 0.45);
       sky.addColorStop(0, '#4a90d9'); sky.addColorStop(1, '#87ceeb');
       ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
@@ -230,11 +282,10 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       ctx.moveTo(0, H * 0.28); ctx.quadraticCurveTo(W / 2, H * 0.18, W, H * 0.28);
       ctx.lineTo(W, H * 0.42); ctx.quadraticCurveTo(W / 2, H * 0.32, 0, H * 0.42);
       ctx.fill();
-      // Crowd dots
-      ctx.fillStyle = 'rgba(255,255,255,0.15)';
-      for (let i = 0; i < 60; i++) {
-        const cx = (i / 60) * W; const cy = H * 0.3 + Math.sin(i * 1.7) * 15;
-        ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      for (let i = 0; i < 80; i++) {
+        const cx = (i / 80) * W, cy = H * 0.3 + Math.sin(i * 1.5) * 18 + Math.cos(i * 2.3) * 6;
+        ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
       }
 
       // Outfield grass
@@ -246,101 +297,114 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
 
       // Mowing lines
-      ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 8;
-      for (let i = 0; i < 12; i++) {
-        const y = H * 0.4 + i * 22;
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.035)'; ctx.lineWidth = 10;
+      for (let i = 0; i < 14; i++) {
+        ctx.beginPath(); ctx.moveTo(0, H * 0.38 + i * 20); ctx.lineTo(W, H * 0.38 + i * 20); ctx.stroke();
       }
 
-      // Infield dirt diamond
+      // Infield dirt
       ctx.fillStyle = '#c4956a';
       ctx.beginPath();
-      ctx.moveTo(W / 2, H * 0.3);
-      ctx.lineTo(W / 2 + 130, H * 0.56);
-      ctx.lineTo(W / 2, H * 0.78);
-      ctx.lineTo(W / 2 - 130, H * 0.56);
+      ctx.moveTo(W / 2, H * 0.3); ctx.lineTo(W / 2 + 130, H * 0.56);
+      ctx.lineTo(W / 2, H * 0.78); ctx.lineTo(W / 2 - 130, H * 0.56);
       ctx.closePath(); ctx.fill();
 
-      // Infield grass cutout
+      // Infield grass
       ctx.fillStyle = '#3cb371';
       ctx.beginPath();
-      ctx.moveTo(W / 2, H * 0.36);
-      ctx.lineTo(W / 2 + 85, H * 0.53);
-      ctx.lineTo(W / 2, H * 0.67);
-      ctx.lineTo(W / 2 - 85, H * 0.53);
+      ctx.moveTo(W / 2, H * 0.36); ctx.lineTo(W / 2 + 85, H * 0.53);
+      ctx.lineTo(W / 2, H * 0.67); ctx.lineTo(W / 2 - 85, H * 0.53);
       ctx.closePath(); ctx.fill();
 
       // Pitcher's mound
       ctx.fillStyle = '#b8845a';
       ctx.beginPath(); ctx.ellipse(W / 2, H * 0.44, 22, 10, 0, 0, Math.PI * 2); ctx.fill();
-      // Rubber
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(W / 2 - 8, H * 0.44 - 2, 16, 4);
+      ctx.fillStyle = '#fff'; ctx.fillRect(W / 2 - 8, H * 0.44 - 2, 16, 4);
 
       // Foul lines
-      ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(W / 2, H * 0.78); ctx.lineTo(W / 2 - 300, H * 0.05);
       ctx.moveTo(W / 2, H * 0.78); ctx.lineTo(W / 2 + 300, H * 0.05);
       ctx.stroke();
 
-      // Bases (white diamonds)
-      const drawBase = (x: number, y: number) => {
-        ctx.fillStyle = '#fff'; ctx.save(); ctx.translate(x, y);
-        ctx.rotate(Math.PI / 4); ctx.fillRect(-5, -5, 10, 10); ctx.restore();
+      // Bases with runners
+      const drawBase = (x: number, y: number, occupied: boolean) => {
+        ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = occupied ? '#ffdd57' : '#fff';
+        ctx.fillRect(-5, -5, 10, 10);
+        if (occupied) { ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2; ctx.strokeRect(-5, -5, 10, 10); }
+        ctx.restore();
+        if (occupied) {
+          // Runner Mii
+          ctx.fillStyle = '#cc3333'; ctx.fillRect(x - 3, y - 18, 6, 10);
+          ctx.fillStyle = '#f5deb3';
+          ctx.beginPath(); ctx.arc(x, y - 21, 4, 0, Math.PI * 2); ctx.fill();
+        }
       };
-      drawBase(W / 2 + 110, H * 0.53);  // 1B
-      drawBase(W / 2, H * 0.32);          // 2B
-      drawBase(W / 2 - 110, H * 0.53);   // 3B
+      for (let i = 0; i < 3; i++) drawBase(BASE_POS[i].x, H * BASE_POS[i].y, g.bases[i]);
+
       // Home plate
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.moveTo(W / 2, H * 0.8);
-      ctx.lineTo(W / 2 + 9, H * 0.78);
-      ctx.lineTo(W / 2 + 9, H * 0.76);
-      ctx.lineTo(W / 2 - 9, H * 0.76);
-      ctx.lineTo(W / 2 - 9, H * 0.78);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(W / 2, H * 0.8); ctx.lineTo(W / 2 + 9, H * 0.78);
+      ctx.lineTo(W / 2 + 9, H * 0.76); ctx.lineTo(W / 2 - 9, H * 0.76);
+      ctx.lineTo(W / 2 - 9, H * 0.78); ctx.closePath(); ctx.fill();
 
-      // Pitcher (Mii-style)
+      // Draw fielders (Mii-style)
+      const drawFielder = (fx: number, fy: number, sz: number, jersey: string) => {
+        ctx.fillStyle = '#f5deb3';
+        ctx.beginPath(); ctx.arc(fx, fy - sz * 2.5, sz * 0.85, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = jersey;
+        ctx.fillRect(fx - sz * 0.6, fy - sz * 1.5, sz * 1.2, sz * 1.8);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(fx - sz * 0.45, fy + sz * 0.3, sz * 0.35, sz);
+        ctx.fillRect(fx + sz * 0.1, fy + sz * 0.3, sz * 0.35, sz);
+      };
+      for (let i = 0; i < FIELDERS.length; i++) {
+        let fx = FIELDERS[i].x, fy = FIELDERS[i].y;
+        if (g.activeFielder === i && g.phase === 'hit_fly') {
+          const t = Math.min(1, g.fielderAnimT * 1.5);
+          fx += (g.hitDestX - fx) * t * 0.6;
+          fy += (g.hitDestY - fy) * t * 0.6;
+        }
+        const sz = fy > H * 0.5 ? 4 : fy > H * 0.25 ? 3.5 : 3;
+        drawFielder(fx, fy, sz, '#e8e8e8');
+      }
+
+      // Pitcher Mii
       const pY = H * 0.38;
       ctx.fillStyle = '#f5deb3';
-      ctx.beginPath(); ctx.arc(W / 2, pY - 18, 7, 0, Math.PI * 2); ctx.fill(); // head
+      ctx.beginPath(); ctx.arc(W / 2, pY - 18, 7, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#e8e8e8';
-      ctx.fillRect(W / 2 - 5, pY - 11, 10, 16); // body
+      ctx.fillRect(W / 2 - 5, pY - 11, 10, 16);
       ctx.fillStyle = '#555';
-      ctx.fillRect(W / 2 - 5, pY + 5, 4, 10); ctx.fillRect(W / 2 + 1, pY + 5, 4, 10); // legs
-      // Pitching arm
+      ctx.fillRect(W / 2 - 5, pY + 5, 4, 10); ctx.fillRect(W / 2 + 1, pY + 5, 4, 10);
       if (g.pitchAnim > 0) {
         ctx.strokeStyle = '#f5deb3'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-        const armAngle = g.pitchAnim * Math.PI * 0.8;
-        ctx.beginPath();
-        ctx.moveTo(W / 2 + 5, pY - 6);
-        ctx.lineTo(W / 2 + 5 + Math.cos(armAngle) * 14, pY - 6 - Math.sin(armAngle) * 14);
+        const arm = g.pitchAnim * Math.PI * 0.8;
+        ctx.beginPath(); ctx.moveTo(W / 2 + 5, pY - 6);
+        ctx.lineTo(W / 2 + 5 + Math.cos(arm) * 14, pY - 6 - Math.sin(arm) * 14);
         ctx.stroke(); ctx.lineCap = 'butt';
       }
 
-      // Batter (Mii-style)
+      // Batter Mii
       const bX = W / 2 + 28, bY = H * 0.76;
       ctx.fillStyle = '#f5deb3';
-      ctx.beginPath(); ctx.arc(bX, bY - 20, 7, 0, Math.PI * 2); ctx.fill(); // head
+      ctx.beginPath(); ctx.arc(bX, bY - 20, 7, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#e0e0e0';
-      ctx.fillRect(bX - 5, bY - 13, 10, 16); // body
+      ctx.fillRect(bX - 5, bY - 13, 10, 16);
       ctx.fillStyle = '#555';
-      ctx.fillRect(bX - 5, bY + 3, 4, 10); ctx.fillRect(bX + 1, bY + 3, 4, 10); // legs
-      // Helmet
+      ctx.fillRect(bX - 5, bY + 3, 4, 10); ctx.fillRect(bX + 1, bY + 3, 4, 10);
       ctx.fillStyle = '#cc3333';
       ctx.beginPath(); ctx.arc(bX, bY - 22, 8, Math.PI, 0); ctx.fill();
-      // Bat
       ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      const batRest = -Math.PI * 0.35;
-      const batSwing = batRest + g.swingAnim * Math.PI * 0.9;
-      ctx.beginPath();
-      ctx.moveTo(bX - 8, bY - 8);
-      ctx.lineTo(bX - 8 + Math.cos(batSwing) * 32, bY - 8 + Math.sin(batSwing) * 32);
+      const batAngle = -Math.PI * 0.35 + g.swingAnim * Math.PI * 0.9;
+      ctx.beginPath(); ctx.moveTo(bX - 8, bY - 8);
+      ctx.lineTo(bX - 8 + Math.cos(batAngle) * 32, bY - 8 + Math.sin(batAngle) * 32);
       ctx.stroke(); ctx.lineCap = 'butt';
 
-      // Strike zone guide (when batting)
+      // Strike zone
       if (g.batting && (g.phase === 'idle' || g.phase === 'pitch')) {
         ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
@@ -350,69 +414,90 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
 
       // Ball during pitch
       if (g.phase === 'pitch') {
-        const t = g.ballZ;
-        const bz = t;
-        const ballScreenX = W / 2 + (g.ballTargetX - W / 2) * bz;
-        const ballScreenY = H * 0.36 + (H * 0.74 - H * 0.36) * bz;
-        const ballR = 3 + bz * 7;
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        ctx.beginPath(); ctx.ellipse(ballScreenX + 2, ballScreenY + ballR + 3, ballR * 0.8, ballR * 0.3, 0, 0, Math.PI * 2); ctx.fill();
-        // Ball
+        const bz = g.ballZ;
+        const bsx = W / 2 + (g.ballTargetX - W / 2) * bz;
+        const bsy = H * 0.36 + (H * 0.74 - H * 0.36) * bz;
+        const br = 3 + bz * 7;
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.beginPath(); ctx.ellipse(bsx + 2, bsy + br + 3, br * 0.8, br * 0.3, 0, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(ballScreenX, ballScreenY, ballR, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(bsx, bsy, br, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(ballScreenX, ballScreenY, ballR * 0.7, -0.5, 0.5); ctx.stroke();
-        ctx.beginPath(); ctx.arc(ballScreenX, ballScreenY, ballR * 0.7, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, -0.5, 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
       }
 
-      // Hit ball flying into field
+      // Hit ball flying
       if (g.phase === 'hit_fly') {
         const t = g.hitBallT;
-        const startX = W / 2, startY = H * 0.74;
-        const bx = startX + (g.hitDestX - startX) * t;
-        const by = startY + (g.hitDestY - startY) * t - Math.sin(t * Math.PI) * 120;
+        const sx = W / 2, sy = H * 0.74;
+        const bx = sx + (g.hitDestX - sx) * t;
+        const by = sy + (g.hitDestY - sy) * t - Math.sin(t * Math.PI) * 120;
         const br = 10 - t * 7;
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo((sx + bx) / 2, by - 40, bx, by); ctx.stroke();
         if (br > 1) {
           ctx.fillStyle = 'rgba(0,0,0,0.1)';
           ctx.beginPath(); ctx.arc(bx + 1, by + br + 2, br * 0.6, 0, Math.PI * 2); ctx.fill();
           ctx.fillStyle = '#fff';
           ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
         }
-        // Trail
-        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(startX, startY); ctx.quadraticCurveTo(bx, by - 30, bx, by); ctx.stroke();
       }
 
-      // Scoreboard (top)
-      ctx.fillStyle = 'rgba(0,0,0,0.65)';
-      const sbH = 36;
-      ctx.beginPath();
-      ctx.roundRect(W / 2 - 170, 6, 340, sbH, 8);
-      ctx.fill();
-      ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillStyle = '#90ee90'; ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 100, 28);
-      ctx.fillStyle = '#aaa'; ctx.fillText(`INN ${g.inning}`, W / 2 - 25, 28);
-      ctx.fillStyle = '#fff';
-      // Outs dots
+      // ── SCOREBOARD HUD ──
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 185, 5, 370, 48, 8); ctx.fill();
+      // Scores
+      ctx.font = 'bold 14px system-ui, sans-serif'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#90ee90'; ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 170, 24);
+      ctx.fillStyle = '#ff9b9b'; ctx.textAlign = 'right';
+      ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 170, 24);
+      // Inning
+      ctx.textAlign = 'center'; ctx.fillStyle = '#bbb'; ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(`INNING ${g.inning}`, W / 2, 20);
+
+      // B-S-O indicators (dot style like real scoreboards)
+      ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'left';
+      const bsoX = W / 2 - 55, bsoY = 40;
+      ctx.fillStyle = '#777'; ctx.fillText('B', bsoX, bsoY);
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = i < g.balls ? '#4ade80' : 'rgba(255,255,255,0.15)';
+        ctx.beginPath(); ctx.arc(bsoX + 14 + i * 10, bsoY - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = '#777'; ctx.fillText('S', bsoX + 58, bsoY);
       for (let i = 0; i < 3; i++) {
-        ctx.beginPath(); ctx.arc(W / 2 + 25 + i * 14, 24, 4, 0, Math.PI * 2);
-        ctx.fillStyle = i < g.outs ? '#ff6b6b' : 'rgba(255,255,255,0.2)'; ctx.fill();
+        ctx.fillStyle = i < g.strikes ? '#f87171' : 'rgba(255,255,255,0.15)';
+        ctx.beginPath(); ctx.arc(bsoX + 70 + i * 10, bsoY - 3, 3.5, 0, Math.PI * 2); ctx.fill();
       }
-      ctx.fillStyle = '#ff9b9b'; ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 110, 28);
+      ctx.fillStyle = '#777'; ctx.fillText('O', bsoX + 100, bsoY);
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i < g.outs ? '#fbbf24' : 'rgba(255,255,255,0.15)';
+        ctx.beginPath(); ctx.arc(bsoX + 113 + i * 10, bsoY - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
 
-      // Count display
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.beginPath(); ctx.roundRect(W / 2 - 60, H - 32, 120, 24, 6); ctx.fill();
-      ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillStyle = '#ffdd57'; ctx.fillText(`${g.strikes}-${g.balls}`, W / 2 - 25, H - 16);
+      // Mini diamond (runners indicator in HUD)
+      const dX = W / 2 + 153, dY = 38, dS = 8;
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(dX, dY - dS); ctx.lineTo(dX + dS, dY); ctx.lineTo(dX, dY + dS); ctx.lineTo(dX - dS, dY); ctx.closePath();
+      ctx.stroke();
+      const bPts: [number, number][] = [[dX + dS, dY], [dX, dY - dS], [dX - dS, dY]];
+      bPts.forEach(([px, py], i) => {
+        ctx.fillStyle = g.bases[i] ? '#ffdd57' : 'rgba(255,255,255,0.08)';
+        ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
+      });
+
+      // Batting/Pitching label
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 38, H - 26, 76, 19, 5); ctx.fill();
+      ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
       ctx.fillStyle = g.batting ? '#90ee90' : '#87ceeb';
-      ctx.fillText(g.batting ? 'BATTING' : 'PITCHING', W / 2 + 20, H - 16);
+      ctx.fillText(g.batting ? 'BATTING' : 'PITCHING', W / 2, H - 13);
 
       // Result banner
-      if ((g.phase === 'hit_fly' && g.hitBallT > 0.4) || g.phase === 'result') {
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.beginPath(); ctx.roundRect(W / 2 - 110, H / 2 - 22, 220, 44, 10); ctx.fill();
+      if ((g.phase === 'hit_fly' && g.hitBallT > 0.35) || g.phase === 'result') {
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.beginPath(); ctx.roundRect(W / 2 - 120, H / 2 - 24, 240, 48, 10); ctx.fill();
         ctx.font = 'bold 22px system-ui, sans-serif'; ctx.textAlign = 'center';
         ctx.fillStyle = g.resultColor;
         ctx.fillText(g.resultText, W / 2, H / 2 + 8);
@@ -422,7 +507,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
     };
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
-  }, [difficulty, maxInnings, sweetSpot, pitchSpd, cpuHitRate]);
+  }, [difficulty, maxInnings, sweetSpot, pitchSpd, cpuContact]);
 
   return (
     <div className="flex flex-col items-center gap-3 p-4">
