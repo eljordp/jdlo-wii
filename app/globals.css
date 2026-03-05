@@ -53,7 +53,7 @@
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   background: linear-gradient(180deg, #dbe7ef 0%, #cddae4 50%, #c4d4e0 100%);
-  border: 2.5px solid rgba(255, 255, 255, 0.75);
+  border: 2.5px solid rgba(255, 255, 255, 0.85);
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.06),
     0 1px 2px rgba(0, 0, 0, 0.04),
@@ -62,10 +62,12 @@
 }
 .channel-tile:hover {
   transform: scale(1.04);
+  border-color: rgba(255, 255, 255, 0.95);
   box-shadow:
-    0 0 0 3px rgba(255, 255, 255, 0.6),
-    0 0 20px rgba(255, 255, 255, 0.25),
-    0 4px 16px rgba(0, 0, 0, 0.08);
+    0 0 0 3px rgba(100, 180, 255, 0.35),
+    0 0 18px rgba(100, 180, 255, 0.2),
+    0 0 40px rgba(100, 180, 255, 0.1),
+    0 4px 16px rgba(0, 0, 0, 0.1);
 }
 .channel-tile:active {
   transform: scale(0.97);
