@@ -145,7 +145,7 @@ export default function WiiApp() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.05 + i * 0.04, duration: 0.3, ease: 'easeOut' }}
                 className="channel-tile flex flex-col items-center justify-center gap-3 md:gap-4"
-                style={{ animation: 'wii-float 3s ease-in-out infinite' }}
+                style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
                 onClick={() => setOpenChannel(tile.id)}
               >
                 {tile.icon === 'profile' ? (
