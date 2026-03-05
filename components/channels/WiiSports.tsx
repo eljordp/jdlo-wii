@@ -666,205 +666,194 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       }
       g.clicked = false;
 
-      // ── DRAW ──
-      // Arena
-      const arena = ctx.createLinearGradient(0, 0, 0, H * 0.45);
-      arena.addColorStop(0, '#1a1028'); arena.addColorStop(1, '#2a1a3a');
-      ctx.fillStyle = arena; ctx.fillRect(0, 0, W, H);
+      // ── DRAW ── (Wii Sports bright outdoor style)
+      // Sky
+      const sky = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+      sky.addColorStop(0, '#5baadf'); sky.addColorStop(1, '#9fd4f0');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
 
-      // Stands
-      ctx.fillStyle = '#3a2a4a';
+      // Clouds
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      [[80, 50, 40], [250, 30, 30], [420, 55, 35], [550, 25, 25]].forEach(([cx, cy, r]) => {
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx - r * 0.6, cy + 5, r * 0.7, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx + r * 0.6, cy + 5, r * 0.7, 0, Math.PI * 2); ctx.fill();
+      });
+
+      // Trees/background
+      ctx.fillStyle = '#4aad5a';
       ctx.beginPath();
-      ctx.moveTo(0, H * 0.1); ctx.quadraticCurveTo(W / 2, H * 0.02, W, H * 0.1);
-      ctx.lineTo(W, H * 0.4); ctx.quadraticCurveTo(W / 2, H * 0.3, 0, H * 0.4);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,200,100,0.06)';
-      for (let i = 0; i < 90; i++) {
-        const cx = (i / 90) * W, cy = H * 0.1 + (i % 4) * H * 0.07 + Math.sin(i * 2.1) * 8;
-        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
-      }
+      ctx.moveTo(0, H * 0.38); ctx.quadraticCurveTo(W * 0.3, H * 0.3, W * 0.5, H * 0.36);
+      ctx.quadraticCurveTo(W * 0.7, H * 0.3, W, H * 0.38);
+      ctx.lineTo(W, H * 0.45); ctx.lineTo(0, H * 0.45); ctx.fill();
 
-      // Court floor
-      const floor = ctx.createLinearGradient(0, H * 0.5, 0, H);
-      floor.addColorStop(0, '#c4873a'); floor.addColorStop(0.4, '#b07530'); floor.addColorStop(1, '#9a6025');
-      ctx.fillStyle = floor;
-      ctx.beginPath();
-      ctx.moveTo(0, H * 0.52); ctx.lineTo(W, H * 0.44);
-      ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+      // Court surface (clean bright hardwood)
+      const court = ctx.createLinearGradient(0, H * 0.42, 0, H);
+      court.addColorStop(0, '#dea85a'); court.addColorStop(0.5, '#cc9545'); court.addColorStop(1, '#bb8638');
+      ctx.fillStyle = court;
+      ctx.fillRect(0, H * 0.42, W, H * 0.58);
 
-      // Wood grain lines
-      ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
+      // Wood plank lines
+      ctx.strokeStyle = 'rgba(160,110,50,0.12)'; ctx.lineWidth = 1;
       for (let i = 0; i < 20; i++) {
-        const y = H * 0.5 + i * 12;
-        ctx.beginPath(); ctx.moveTo(0, y + 4); ctx.lineTo(W, y); ctx.stroke();
+        const y = H * 0.44 + i * 14;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
       }
 
-      // Court lines
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(380, H * 0.46); ctx.lineTo(380, H);
-      ctx.moveTo(440, H * 0.45); ctx.lineTo(440, H);
-      ctx.stroke();
+      // Court lines (white, clean)
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2.5;
+      // Key/lane
+      ctx.strokeRect(395, H * 0.44, 55, H * 0.56);
+      // Free throw arc
+      ctx.beginPath(); ctx.ellipse(422, H * 0.72, 55, 18, 0, Math.PI, 0); ctx.stroke();
       // 3-point arc
-      ctx.beginPath(); ctx.arc(rimX + 10, H * 0.85, 220, Math.PI * 0.6, Math.PI * 1.12); ctx.stroke();
-      // Free throw circle
-      ctx.beginPath(); ctx.ellipse(405, H * 0.72, 55, 20, 0, Math.PI, 0); ctx.stroke();
-      // Center court hint
-      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-      ctx.beginPath(); ctx.moveTo(50, H * 0.52); ctx.lineTo(50, H); ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rimX + 5, H * 0.8, 210, Math.PI * 0.62, Math.PI * 1.1); ctx.stroke();
+      // Baseline
+      ctx.beginPath(); ctx.moveTo(W - 10, H * 0.44); ctx.lineTo(W - 10, H); ctx.stroke();
 
-      // Backboard
-      ctx.fillStyle = '#ccc';
-      ctx.fillRect(bbX, rimY - 55, 10, 110);
-      ctx.strokeStyle = '#888'; ctx.lineWidth = 2;
-      ctx.strokeRect(bbX, rimY - 55, 10, 110);
-      ctx.strokeStyle = '#e53e3e'; ctx.lineWidth = 2;
-      ctx.strokeRect(bbX - 1, rimY - 22, 10, 44);
+      // Backboard + hoop (clean, simple)
       // Pole
-      ctx.fillStyle = '#777';
-      ctx.fillRect(bbX + 2, rimY + 55, 8, H - rimY - 55);
+      ctx.fillStyle = '#aaa';
+      ctx.fillRect(bbX + 3, rimY + 55, 6, H * 0.56 - 55);
+      // Backboard
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(bbX, rimY - 48, 8, 96);
+      ctx.strokeStyle = '#bbb'; ctx.lineWidth = 2;
+      ctx.strokeRect(bbX, rimY - 48, 8, 96);
+      // Red square target
+      ctx.strokeStyle = '#e05050'; ctx.lineWidth = 2;
+      ctx.strokeRect(bbX - 1, rimY - 18, 8, 36);
 
       // Rim
-      const rBounce = Math.sin(g.rimBounce * Math.PI * 3) * g.rimBounce * 6;
-      ctx.strokeStyle = '#f97316'; ctx.lineWidth = 4;
+      const rBounce = Math.sin(g.rimBounce * Math.PI * 3) * g.rimBounce * 5;
+      ctx.strokeStyle = '#e85d04'; ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.moveTo(bbX - 1, rimY + rBounce);
       ctx.lineTo(rimX - 28, rimY + rBounce);
       ctx.stroke();
-      // Rim front
-      ctx.beginPath();
-      ctx.ellipse(rimX - 14, rimY + rBounce, 15, 4, 0, 0, Math.PI);
-      ctx.stroke();
 
-      // Net
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
-      const nSway = Math.sin(g.netAnim * Math.PI * 5) * g.netAnim * 10;
-      for (let i = 0; i < 6; i++) {
-        const nx = rimX - 28 + i * 5.5;
+      // Net (white, simple)
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5;
+      const nSway = Math.sin(g.netAnim * Math.PI * 5) * g.netAnim * 8;
+      for (let i = 0; i < 5; i++) {
+        const nx = rimX - 27 + i * 5 + (bbX - rimX + 25) * (i / 4);
         ctx.beginPath();
         ctx.moveTo(nx, rimY + rBounce + 2);
-        ctx.quadraticCurveTo(nx + nSway * (1 - i * 0.15), rimY + 28, nx + nSway * 0.3, rimY + 42);
+        ctx.quadraticCurveTo(nx + nSway * (1 - i * 0.2), rimY + 25, nx + nSway * 0.3, rimY + 40);
         ctx.stroke();
       }
 
-      // Shot spot marker
+      // Shot spot marker (subtle circle on court)
       const spot = SHOT_SPOTS[g.shotSpot];
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 18, 6, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 16, 5, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
 
-      // Player Mii
+      // Mii character
       const drawMii = (mx: number, my: number, jersey: string, shooting: boolean) => {
         ctx.fillStyle = '#444';
-        ctx.fillRect(mx - 5, my + 4, 4, 13); ctx.fillRect(mx + 1, my + 4, 4, 13);
+        ctx.fillRect(mx - 5, my + 4, 4, 12); ctx.fillRect(mx + 1, my + 4, 4, 12);
         ctx.fillStyle = jersey;
-        ctx.fillRect(mx - 6, my - 14, 12, 19);
-        // Number
-        ctx.font = 'bold 7px system-ui, sans-serif'; ctx.textAlign = 'center';
-        ctx.fillStyle = '#fff'; ctx.fillText('23', mx, my - 2);
+        ctx.fillRect(mx - 6, my - 12, 12, 17);
         ctx.fillStyle = '#f5deb3';
-        ctx.beginPath(); ctx.arc(mx, my - 20, 7, 0, Math.PI * 2); ctx.fill();
-        // Arms
+        ctx.beginPath(); ctx.arc(mx, my - 18, 7, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#f5deb3'; ctx.lineWidth = 3; ctx.lineCap = 'round';
         if (shooting) {
-          ctx.beginPath(); ctx.moveTo(mx + 6, my - 10); ctx.lineTo(mx + 14, my - 26); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(mx - 6, my - 10); ctx.lineTo(mx - 2, my - 24); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx + 6, my - 8); ctx.lineTo(mx + 12, my - 24); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx - 6, my - 8); ctx.lineTo(mx - 2, my - 22); ctx.stroke();
         } else {
-          ctx.beginPath(); ctx.moveTo(mx + 6, my - 8); ctx.lineTo(mx + 12, my); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(mx - 6, my - 8); ctx.lineTo(mx - 12, my); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx + 6, my - 6); ctx.lineTo(mx + 11, my + 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx - 6, my - 6); ctx.lineTo(mx - 11, my + 2); ctx.stroke();
         }
         ctx.lineCap = 'butt';
       };
       const isAiming = g.phase === 'aiming' || (g.phase === 'idle' && g.playerTurn);
       drawMii(spot.x, spot.y, g.playerTurn ? '#3b82f6' : '#ef4444', isAiming || g.phase === 'flying');
 
-      // Ball drawing helper
+      // Ball
       const drawBall = (bx: number, by: number, r: number) => {
         ctx.fillStyle = '#f97316';
         ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#c2410c'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(bx - r, by); ctx.lineTo(bx + r, by); ctx.stroke();
-        ctx.beginPath(); ctx.arc(bx, by, r * 0.5, -Math.PI * 0.5, Math.PI * 0.5); ctx.stroke();
       };
 
-      // Ball in hands
       if (g.phase === 'aiming' || (g.phase === 'idle' && g.timer > 5)) {
-        drawBall(spot.x + 12, spot.y - 30, 8);
+        drawBall(spot.x + 10, spot.y - 26, 7);
       }
-
-      // Ball in flight
       if (g.phase === 'flying') {
         const t = g.ballT;
         const bx = g.ballStartX + (g.ballEndX - g.ballStartX) * t;
         const by = g.ballStartY + (g.ballEndY - g.ballStartY) * t - Math.sin(t * Math.PI) * g.ballArcH;
-        const br = 8 - t * 2.5;
-        ctx.strokeStyle = 'rgba(249,115,22,0.25)'; ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(g.ballStartX, g.ballStartY);
-        ctx.quadraticCurveTo((g.ballStartX + bx) / 2, by - 30, bx, by);
-        ctx.stroke();
+        const br = 7 - t * 2;
         if (br > 2) drawBall(bx, by, br);
       }
-
-      // Ball dropping through net on make
-      if (g.phase === 'result' && g.made && g.timer > 20) {
-        const dropT = Math.min(1, (45 - g.timer) / 15);
-        const dropY = rimY + dropT * 45;
-        drawBall(rimX - 14, dropY, 6 - dropT * 2);
+      if (g.phase === 'result' && g.made && g.timer > 22) {
+        const dropT = Math.min(1, (45 - g.timer) / 12);
+        drawBall(rimX - 14, rimY + dropT * 42, 5 - dropT * 2);
       }
 
-      // Power meter
+      // Power meter (clean Wii-style)
       if (g.phase === 'aiming') {
-        const pmX = 28, pmY = H * 0.25, pmW = 18, pmH = 200;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.beginPath(); ctx.roundRect(pmX - 5, pmY - 20, pmW + 10, pmH + 34, 8); ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(pmX, pmY, pmW, pmH);
-        // Sweet spot zone
-        ctx.fillStyle = 'rgba(34,197,94,0.25)';
-        ctx.fillRect(pmX, pmY + pmH * (1 - 0.85), pmW, pmH * 0.2);
+        const pmX = 24, pmY = H * 0.2, pmH = 180, pmW = 14;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 14, pmW + 6, pmH + 24, 8); ctx.fill();
+        ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 14, pmW + 6, pmH + 24, 8); ctx.stroke();
+        // Track
+        ctx.fillStyle = '#e5e5e5'; ctx.fillRect(pmX, pmY, pmW, pmH);
+        // Sweet zone
+        ctx.fillStyle = 'rgba(34,197,94,0.3)';
+        ctx.fillRect(pmX, pmY + pmH * 0.15, pmW, pmH * 0.2);
         // Fill
         const fillH = (g.power / 100) * pmH;
-        ctx.fillStyle = g.power > 65 && g.power < 85 ? '#22c55e' : g.power > 45 ? '#eab308' : '#ef4444';
+        const barColor = g.power > 65 && g.power < 85 ? '#22c55e' : g.power > 45 ? '#eab308' : '#ef4444';
+        ctx.fillStyle = barColor;
         ctx.fillRect(pmX, pmY + pmH - fillH, pmW, fillH);
-        // Arrow marker
-        ctx.fillStyle = '#fff';
+        // Pointer
+        ctx.fillStyle = '#333';
         const arrowY = pmY + pmH - fillH;
-        ctx.beginPath(); ctx.moveTo(pmX + pmW + 4, arrowY); ctx.lineTo(pmX + pmW + 12, arrowY - 4); ctx.lineTo(pmX + pmW + 12, arrowY + 4); ctx.closePath(); ctx.fill();
-        ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-        ctx.fillText('PWR', pmX + pmW / 2, pmY - 8);
+        ctx.beginPath();
+        ctx.moveTo(pmX + pmW + 3, arrowY);
+        ctx.lineTo(pmX + pmW + 10, arrowY - 5);
+        ctx.lineTo(pmX + pmW + 10, arrowY + 5);
+        ctx.closePath(); ctx.fill();
       }
 
-      // ── SCOREBOARD ──
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.beginPath(); ctx.roundRect(W / 2 - 165, 5, 330, 38, 8); ctx.fill();
+      // ── SCOREBOARD (Wii-clean) ──
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 140, 6, 280, 34, 10); ctx.fill();
+      ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(W / 2 - 140, 6, 280, 34, 10); ctx.stroke();
       ctx.font = 'bold 14px system-ui, sans-serif';
-      ctx.textAlign = 'left'; ctx.fillStyle = '#60a5fa';
-      ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 150, 28);
-      ctx.textAlign = 'center'; ctx.fillStyle = '#fbbf24';
-      ctx.font = 'bold 16px system-ui, sans-serif';
+      ctx.textAlign = 'left'; ctx.fillStyle = '#3b82f6';
+      ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 125, 28);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#555'; ctx.font = 'bold 18px system-ui, sans-serif';
       ctx.fillText(`${Math.ceil(Math.max(0, g.timeLeft))}`, W / 2, 30);
-      ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#888';
-      ctx.fillText('SEC', W / 2, 18);
+      ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#999';
+      ctx.fillText('SEC', W / 2, 17);
       ctx.font = 'bold 14px system-ui, sans-serif';
-      ctx.textAlign = 'right'; ctx.fillStyle = '#f87171';
-      ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 150, 28);
+      ctx.textAlign = 'right'; ctx.fillStyle = '#ef4444';
+      ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 125, 28);
 
-      // Shot info
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.beginPath(); ctx.roundRect(W / 2 - 50, H - 28, 100, 20, 5); ctx.fill();
+      // Shot label
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 42, H - 26, 84, 18, 5); ctx.fill();
       ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillStyle = g.playerTurn ? '#60a5fa' : '#f87171';
-      ctx.fillText(`${spot.pts}PT • ${g.playerTurn ? 'YOUR SHOT' : 'CPU'}`, W / 2, H - 14);
+      ctx.fillStyle = '#555';
+      ctx.fillText(`${spot.pts}PT • ${g.playerTurn ? 'YOU' : 'CPU'}`, W / 2, H - 13);
 
       // Result banner
       if (g.phase === 'result' && g.timer > 12) {
-        ctx.fillStyle = 'rgba(0,0,0,0.65)';
-        ctx.beginPath(); ctx.roundRect(W / 2 - 100, H / 2 - 24, 200, 48, 10); ctx.fill();
-        ctx.font = 'bold 24px system-ui, sans-serif'; ctx.textAlign = 'center';
-        ctx.fillStyle = g.resultColor;
-        ctx.fillText(g.resultText, W / 2, H / 2 + 9);
+        ctx.fillStyle = g.made ? 'rgba(34,197,94,0.85)' : 'rgba(220,50,50,0.8)';
+        ctx.beginPath(); ctx.roundRect(W / 2 - 90, H / 2 - 22, 180, 44, 12); ctx.fill();
+        ctx.font = 'bold 22px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(g.resultText, W / 2, H / 2 + 8);
       }
 
       if (!g.gameOver) raf = requestAnimationFrame(loop);
