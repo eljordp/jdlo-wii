@@ -91,46 +91,42 @@ export default function WiiApp() {
             transition={{ duration: 1, ease: 'easeInOut' }}
             onClick={() => setScreen('desktop')}
           >
-            {/* Warning triangle — authentic Wii style */}
-            <div className="mb-10">
-              <div className="w-0 h-0 mx-auto relative"
-                style={{
-                  borderLeft: '52px solid transparent',
-                  borderRight: '52px solid transparent',
-                  borderBottom: '90px solid #fbbf24',
-                  filter: 'drop-shadow(0 0 30px rgba(251,191,36,0.3))',
-                }}
-              >
-                <span className="absolute text-black text-3xl font-black select-none" style={{ top: '28px', left: '-7px' }}>!</span>
+            {/* Warning icon with hue-rotate */}
+            <div className="mb-8" style={{ animation: 'hue-shift 4s linear infinite' }}>
+              <div className="w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center mx-auto shadow-[0_0_60px_rgba(251,191,36,0.4)]"
+                style={{ background: 'linear-gradient(135deg, #fbbf24, #f59e0b)' }}>
+                <span className="text-black text-5xl md:text-7xl font-black select-none">!</span>
               </div>
             </div>
 
-            <h1 className="text-white text-lg md:text-2xl font-bold tracking-[0.35em] mb-10 uppercase">
-              WARNING — HEALTH & SAFETY
+            <h1 className="text-white text-xl md:text-3xl font-bold tracking-[0.3em] mb-8 uppercase">
+              <span style={{ animation: 'pulse-opacity 2s ease-in-out infinite' }}>⚠</span>
+              <span className="mx-3">WARNING</span>
+              <span style={{ animation: 'pulse-opacity 2s ease-in-out infinite 0.5s' }}>⚠</span>
             </h1>
 
-            <p className="text-gray-300 text-xs md:text-sm max-w-lg mb-8 leading-relaxed tracking-wide">
+            <p className="text-gray-300 text-xs md:text-sm max-w-md mb-6 leading-relaxed tracking-wide">
               BEFORE PLAYING, READ YOUR OPERATIONS MANUAL FOR
               IMPORTANT INFORMATION ABOUT YOUR HEALTH AND SAFETY.
             </p>
-            <p className="text-gray-500 text-[11px] mb-1.5 tracking-wide">Also available at</p>
+            <p className="text-gray-500 text-xs mb-1">Also available at</p>
             <a
               href="https://jdlo.online"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#6ec6ff] hover:text-[#9dd8ff] text-sm underline underline-offset-4 mb-20 tracking-wide"
+              className="text-[#6ec6ff] hover:text-[#9dd8ff] text-sm underline underline-offset-2 mb-16"
               onClick={e => e.stopPropagation()}
             >
               jdlo.online
             </a>
 
             {/* Press Ⓐ */}
-            <div className="flex items-center gap-3" style={{ animation: 'pulse-opacity 2s ease-in-out infinite' }}>
-              <span className="text-white/60 text-sm tracking-wide">Press</span>
-              <div className="w-8 h-8 rounded-full border-2 border-white/80 flex items-center justify-center">
-                <span className="text-white/80 font-bold text-xs">A</span>
+            <div className="flex items-center gap-3" style={{ animation: 'pulse-opacity 1.5s ease-in-out infinite' }}>
+              <span className="text-white/70 text-sm tracking-wide">Press</span>
+              <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.3)]">
+                <span className="text-black font-black text-base">A</span>
               </div>
-              <span className="text-white/60 text-sm tracking-wide">to continue.</span>
+              <span className="text-white/70 text-sm tracking-wide">to continue.</span>
             </div>
           </motion.div>
         )}
