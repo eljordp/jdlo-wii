@@ -524,87 +524,364 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
   );
 }
 
-// ═══════ BASKETBALL ═══════
+// Shot positions: x, y (canvas coords), point value
+const SHOT_SPOTS = [
+  { x: 260, y: 320, pts: 2, label: 'Free Throw' },
+  { x: 180, y: 330, pts: 3, label: '3-Point' },
+  { x: 100, y: 340, pts: 3, label: 'Deep Three' },
+  { x: 320, y: 310, pts: 2, label: 'Mid-Range' },
+  { x: 150, y: 350, pts: 3, label: 'Corner 3' },
+];
+
+// ═══════ BASKETBALL (Canvas) ═══════
 function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
-  const [playerScore, setPlayerScore] = useState(0);
-  const [cpuScore, setCpuScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(30);
-  const [power, setPower] = useState(0);
-  const [shooting, setShooting] = useState(false);
-  const [message, setMessage] = useState('Click SHOOT at peak power!');
-  const [playerTurn, setPlayerTurn] = useState(true);
-  const [gameOver, setGameOver] = useState(false);
-  const rafRef = useRef<number>(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hud, setHud] = useState({ player: 0, cpu: 0, time: 45, playerTurn: true, gameOver: false, message: 'Click to shoot!' });
+
+  const threshold = difficulty === 'easy' ? 28 : difficulty === 'medium' ? 18 : 10;
+  const cpuMake = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.5 : 0.7;
+  const gameTime = difficulty === 'easy' ? 50 : difficulty === 'medium' ? 40 : 30;
+
+  const gRef = useRef({
+    phase: 'idle' as 'idle' | 'aiming' | 'flying' | 'result',
+    timer: 0, power: 0, powerDir: 1,
+    ballT: 0, ballStartX: 0, ballStartY: 0,
+    ballEndX: 0, ballEndY: 0, ballArcH: 0,
+    made: false, resultText: '', resultColor: '#fff',
+    playerScore: 0, cpuScore: 0, playerTurn: true,
+    timeLeft: 0, gameOver: false, shotSpot: 0,
+    rimBounce: 0, netAnim: 0, clicked: false,
+  });
 
   useEffect(() => {
-    if (gameOver) return;
-    const timer = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) { setGameOver(true); return 0; }
-        return t - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [gameOver]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const W = 600, H = 420;
+    canvas.width = W; canvas.height = H;
+    const g = gRef.current;
+    let raf: number, lastTime = Date.now();
 
-  useEffect(() => {
-    if (!shooting) return;
-    let start = Date.now();
-    const animate = () => {
-      const elapsed = (Date.now() - start) % 2000;
-      setPower(elapsed < 1000 ? elapsed / 10 : (2000 - elapsed) / 10);
-      rafRef.current = requestAnimationFrame(animate);
+    const rimX = 490, rimY = 168, bbX = 518;
+
+    const syncHud = (msg: string) => {
+      setHud({ player: g.playerScore, cpu: g.cpuScore, time: Math.ceil(Math.max(0, g.timeLeft)), playerTurn: g.playerTurn, gameOver: g.gameOver, message: msg });
     };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [shooting]);
 
-  const shoot = () => {
-    if (gameOver) return;
-    if (!shooting) { setShooting(true); return; }
-    setShooting(false);
-    const accuracy = Math.abs(power - 75);
-    const threshold = difficulty === 'easy' ? 30 : difficulty === 'medium' ? 20 : 12;
-    const made = accuracy < threshold;
-    const points = power > 70 ? 3 : 2;
-    if (playerTurn) {
-      if (made) { setPlayerScore(s => s + points); setMessage(`${points}-pointer! 🏀🔥`); }
-      else setMessage('Missed! 😤');
-    } else {
-      if (made) { setCpuScore(s => s + points); setMessage(`CPU scores ${points}!`); }
-      else setMessage('CPU missed!');
-    }
-    setPlayerTurn(t => !t);
-    setPower(0);
-  };
+    const launchBall = (accuracy: number) => {
+      const spot = SHOT_SPOTS[g.shotSpot];
+      g.ballStartX = spot.x + 10; g.ballStartY = spot.y - 28;
+      g.made = accuracy < threshold;
+      if (g.made) {
+        g.ballEndX = rimX - 12 + (Math.random() - 0.5) * 8;
+        g.ballEndY = rimY;
+        g.ballArcH = 130 + Math.random() * 30;
+      } else {
+        const miss = (accuracy > 0 ? 1 : -1) * (0.3 + Math.random() * 0.5);
+        g.ballEndX = rimX - 12 + miss * 35;
+        g.ballEndY = rimY + Math.abs(miss) * 20 - 15;
+        g.ballArcH = 90 + Math.random() * 60;
+      }
+      g.phase = 'flying'; g.ballT = 0;
+    };
+
+    const shotResult = () => {
+      const spot = SHOT_SPOTS[g.shotSpot];
+      const tag = g.playerTurn ? '' : 'CPU ';
+      if (g.made) {
+        if (g.playerTurn) g.playerScore += spot.pts; else g.cpuScore += spot.pts;
+        g.resultText = `${tag}${spot.pts === 3 ? 'THREE!' : 'BUCKET!'}`;
+        g.resultColor = '#ffdd57'; g.netAnim = 1;
+        syncHud(`${tag}${spot.pts}-pointer!`);
+      } else {
+        g.resultText = `${tag}MISS!`; g.resultColor = '#ff6b6b'; g.rimBounce = 1;
+        syncHud(`${tag}Missed!`);
+      }
+      g.phase = 'result'; g.timer = 45;
+    };
+
+    const nextTurn = () => {
+      g.playerTurn = !g.playerTurn;
+      g.shotSpot = (g.shotSpot + 1) % SHOT_SPOTS.length;
+      g.phase = 'idle'; g.timer = 25;
+      g.rimBounce = 0; g.netAnim = 0;
+      syncHud(g.playerTurn ? 'Your shot!' : 'CPU shooting...');
+    };
+
+    const onClick = () => { g.clicked = true; };
+    canvas.addEventListener('click', onClick);
+    canvas.addEventListener('touchstart', onClick, { passive: true });
+
+    g.phase = 'idle'; g.timer = 30; g.playerScore = 0; g.cpuScore = 0;
+    g.timeLeft = gameTime; g.playerTurn = true; g.gameOver = false; g.shotSpot = 0;
+    syncHud('Click to shoot!');
+
+    const loop = () => {
+      const now = Date.now(); const dt = (now - lastTime) / 1000; lastTime = now;
+
+      if (!g.gameOver) {
+        g.timeLeft -= dt;
+        if (g.timeLeft <= 0 && g.phase !== 'flying') {
+          g.timeLeft = 0; g.gameOver = true;
+          g.resultText = 'TIME!'; g.resultColor = '#ffdd57';
+          g.phase = 'result'; g.timer = 70;
+          syncHud('Time\'s up!');
+        }
+      }
+
+      // UPDATE
+      if (g.phase === 'idle') {
+        g.timer--;
+        if (g.timer <= 0 && !g.gameOver) {
+          if (g.playerTurn) {
+            g.phase = 'aiming'; g.power = 0; g.powerDir = 1;
+            syncHud('Click when the bar is green!');
+          } else {
+            const acc = Math.random() < cpuMake ? Math.random() * threshold * 0.8 : threshold + Math.random() * 20;
+            launchBall(acc);
+          }
+        }
+        if (g.playerTurn && g.clicked && g.timer > 0) {
+          g.clicked = false; g.timer = 0;
+        }
+      } else if (g.phase === 'aiming') {
+        g.power += g.powerDir * 1.4;
+        if (g.power >= 100) { g.power = 100; g.powerDir = -1; }
+        if (g.power <= 0) { g.power = 0; g.powerDir = 1; }
+        if (g.clicked) {
+          g.clicked = false;
+          launchBall(Math.abs(g.power - 75));
+        }
+      } else if (g.phase === 'flying') {
+        g.ballT += 0.02;
+        if (g.ballT >= 1) shotResult();
+      } else if (g.phase === 'result') {
+        g.timer--;
+        g.rimBounce = Math.max(0, g.rimBounce - 0.04);
+        g.netAnim = Math.max(0, g.netAnim - 0.025);
+        if (g.timer <= 0) {
+          if (g.gameOver) { syncHud('Game Over!'); return; }
+          nextTurn();
+        }
+      }
+      g.clicked = false;
+
+      // ── DRAW ──
+      // Arena
+      const arena = ctx.createLinearGradient(0, 0, 0, H * 0.45);
+      arena.addColorStop(0, '#1a1028'); arena.addColorStop(1, '#2a1a3a');
+      ctx.fillStyle = arena; ctx.fillRect(0, 0, W, H);
+
+      // Stands
+      ctx.fillStyle = '#3a2a4a';
+      ctx.beginPath();
+      ctx.moveTo(0, H * 0.1); ctx.quadraticCurveTo(W / 2, H * 0.02, W, H * 0.1);
+      ctx.lineTo(W, H * 0.4); ctx.quadraticCurveTo(W / 2, H * 0.3, 0, H * 0.4);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,200,100,0.06)';
+      for (let i = 0; i < 90; i++) {
+        const cx = (i / 90) * W, cy = H * 0.1 + (i % 4) * H * 0.07 + Math.sin(i * 2.1) * 8;
+        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Court floor
+      const floor = ctx.createLinearGradient(0, H * 0.5, 0, H);
+      floor.addColorStop(0, '#c4873a'); floor.addColorStop(0.4, '#b07530'); floor.addColorStop(1, '#9a6025');
+      ctx.fillStyle = floor;
+      ctx.beginPath();
+      ctx.moveTo(0, H * 0.52); ctx.lineTo(W, H * 0.44);
+      ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+
+      // Wood grain lines
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
+      for (let i = 0; i < 20; i++) {
+        const y = H * 0.5 + i * 12;
+        ctx.beginPath(); ctx.moveTo(0, y + 4); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      // Court lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(380, H * 0.46); ctx.lineTo(380, H);
+      ctx.moveTo(440, H * 0.45); ctx.lineTo(440, H);
+      ctx.stroke();
+      // 3-point arc
+      ctx.beginPath(); ctx.arc(rimX + 10, H * 0.85, 220, Math.PI * 0.6, Math.PI * 1.12); ctx.stroke();
+      // Free throw circle
+      ctx.beginPath(); ctx.ellipse(405, H * 0.72, 55, 20, 0, Math.PI, 0); ctx.stroke();
+      // Center court hint
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.beginPath(); ctx.moveTo(50, H * 0.52); ctx.lineTo(50, H); ctx.stroke();
+
+      // Backboard
+      ctx.fillStyle = '#ccc';
+      ctx.fillRect(bbX, rimY - 55, 10, 110);
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 2;
+      ctx.strokeRect(bbX, rimY - 55, 10, 110);
+      ctx.strokeStyle = '#e53e3e'; ctx.lineWidth = 2;
+      ctx.strokeRect(bbX - 1, rimY - 22, 10, 44);
+      // Pole
+      ctx.fillStyle = '#777';
+      ctx.fillRect(bbX + 2, rimY + 55, 8, H - rimY - 55);
+
+      // Rim
+      const rBounce = Math.sin(g.rimBounce * Math.PI * 3) * g.rimBounce * 6;
+      ctx.strokeStyle = '#f97316'; ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(bbX - 1, rimY + rBounce);
+      ctx.lineTo(rimX - 28, rimY + rBounce);
+      ctx.stroke();
+      // Rim front
+      ctx.beginPath();
+      ctx.ellipse(rimX - 14, rimY + rBounce, 15, 4, 0, 0, Math.PI);
+      ctx.stroke();
+
+      // Net
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+      const nSway = Math.sin(g.netAnim * Math.PI * 5) * g.netAnim * 10;
+      for (let i = 0; i < 6; i++) {
+        const nx = rimX - 28 + i * 5.5;
+        ctx.beginPath();
+        ctx.moveTo(nx, rimY + rBounce + 2);
+        ctx.quadraticCurveTo(nx + nSway * (1 - i * 0.15), rimY + 28, nx + nSway * 0.3, rimY + 42);
+        ctx.stroke();
+      }
+
+      // Shot spot marker
+      const spot = SHOT_SPOTS[g.shotSpot];
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 18, 6, 0, 0, Math.PI * 2); ctx.stroke();
+
+      // Player Mii
+      const drawMii = (mx: number, my: number, jersey: string, shooting: boolean) => {
+        ctx.fillStyle = '#444';
+        ctx.fillRect(mx - 5, my + 4, 4, 13); ctx.fillRect(mx + 1, my + 4, 4, 13);
+        ctx.fillStyle = jersey;
+        ctx.fillRect(mx - 6, my - 14, 12, 19);
+        // Number
+        ctx.font = 'bold 7px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff'; ctx.fillText('23', mx, my - 2);
+        ctx.fillStyle = '#f5deb3';
+        ctx.beginPath(); ctx.arc(mx, my - 20, 7, 0, Math.PI * 2); ctx.fill();
+        // Arms
+        ctx.strokeStyle = '#f5deb3'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        if (shooting) {
+          ctx.beginPath(); ctx.moveTo(mx + 6, my - 10); ctx.lineTo(mx + 14, my - 26); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx - 6, my - 10); ctx.lineTo(mx - 2, my - 24); ctx.stroke();
+        } else {
+          ctx.beginPath(); ctx.moveTo(mx + 6, my - 8); ctx.lineTo(mx + 12, my); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx - 6, my - 8); ctx.lineTo(mx - 12, my); ctx.stroke();
+        }
+        ctx.lineCap = 'butt';
+      };
+      const isAiming = g.phase === 'aiming' || (g.phase === 'idle' && g.playerTurn);
+      drawMii(spot.x, spot.y, g.playerTurn ? '#3b82f6' : '#ef4444', isAiming || g.phase === 'flying');
+
+      // Ball drawing helper
+      const drawBall = (bx: number, by: number, r: number) => {
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#c2410c'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx - r, by); ctx.lineTo(bx + r, by); ctx.stroke();
+        ctx.beginPath(); ctx.arc(bx, by, r * 0.5, -Math.PI * 0.5, Math.PI * 0.5); ctx.stroke();
+      };
+
+      // Ball in hands
+      if (g.phase === 'aiming' || (g.phase === 'idle' && g.timer > 5)) {
+        drawBall(spot.x + 12, spot.y - 30, 8);
+      }
+
+      // Ball in flight
+      if (g.phase === 'flying') {
+        const t = g.ballT;
+        const bx = g.ballStartX + (g.ballEndX - g.ballStartX) * t;
+        const by = g.ballStartY + (g.ballEndY - g.ballStartY) * t - Math.sin(t * Math.PI) * g.ballArcH;
+        const br = 8 - t * 2.5;
+        ctx.strokeStyle = 'rgba(249,115,22,0.25)'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(g.ballStartX, g.ballStartY);
+        ctx.quadraticCurveTo((g.ballStartX + bx) / 2, by - 30, bx, by);
+        ctx.stroke();
+        if (br > 2) drawBall(bx, by, br);
+      }
+
+      // Ball dropping through net on make
+      if (g.phase === 'result' && g.made && g.timer > 20) {
+        const dropT = Math.min(1, (45 - g.timer) / 15);
+        const dropY = rimY + dropT * 45;
+        drawBall(rimX - 14, dropY, 6 - dropT * 2);
+      }
+
+      // Power meter
+      if (g.phase === 'aiming') {
+        const pmX = 28, pmY = H * 0.25, pmW = 18, pmH = 200;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.beginPath(); ctx.roundRect(pmX - 5, pmY - 20, pmW + 10, pmH + 34, 8); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(pmX, pmY, pmW, pmH);
+        // Sweet spot zone
+        ctx.fillStyle = 'rgba(34,197,94,0.25)';
+        ctx.fillRect(pmX, pmY + pmH * (1 - 0.85), pmW, pmH * 0.2);
+        // Fill
+        const fillH = (g.power / 100) * pmH;
+        ctx.fillStyle = g.power > 65 && g.power < 85 ? '#22c55e' : g.power > 45 ? '#eab308' : '#ef4444';
+        ctx.fillRect(pmX, pmY + pmH - fillH, pmW, fillH);
+        // Arrow marker
+        ctx.fillStyle = '#fff';
+        const arrowY = pmY + pmH - fillH;
+        ctx.beginPath(); ctx.moveTo(pmX + pmW + 4, arrowY); ctx.lineTo(pmX + pmW + 12, arrowY - 4); ctx.lineTo(pmX + pmW + 12, arrowY + 4); ctx.closePath(); ctx.fill();
+        ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+        ctx.fillText('PWR', pmX + pmW / 2, pmY - 8);
+      }
+
+      // ── SCOREBOARD ──
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 165, 5, 330, 38, 8); ctx.fill();
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.textAlign = 'left'; ctx.fillStyle = '#60a5fa';
+      ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 150, 28);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 16px system-ui, sans-serif';
+      ctx.fillText(`${Math.ceil(Math.max(0, g.timeLeft))}`, W / 2, 30);
+      ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#888';
+      ctx.fillText('SEC', W / 2, 18);
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.textAlign = 'right'; ctx.fillStyle = '#f87171';
+      ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 150, 28);
+
+      // Shot info
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 50, H - 28, 100, 20, 5); ctx.fill();
+      ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = g.playerTurn ? '#60a5fa' : '#f87171';
+      ctx.fillText(`${spot.pts}PT • ${g.playerTurn ? 'YOUR SHOT' : 'CPU'}`, W / 2, H - 14);
+
+      // Result banner
+      if (g.phase === 'result' && g.timer > 12) {
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.beginPath(); ctx.roundRect(W / 2 - 100, H / 2 - 24, 200, 48, 10); ctx.fill();
+        ctx.font = 'bold 24px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = g.resultColor;
+        ctx.fillText(g.resultText, W / 2, H / 2 + 9);
+      }
+
+      if (!g.gameOver) raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
+  }, [difficulty, threshold, cpuMake, gameTime]);
 
   return (
-    <div className="flex flex-col items-center gap-4 p-6 text-center">
-      <div className="flex gap-6 text-white">
-        <div><p className="text-xs opacity-60">YOU</p><p className="text-3xl font-black">{playerScore}</p></div>
-        <div><p className="text-xs opacity-60">TIME</p><p className="text-3xl font-black">{timeLeft}s</p></div>
-        <div><p className="text-xs opacity-60">CPU</p><p className="text-3xl font-black">{cpuScore}</p></div>
-      </div>
-      {/* Power meter */}
-      <div className="w-full max-w-xs">
-        <div className="h-6 bg-white/20 rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-75" style={{
-            width: `${power}%`,
-            background: power > 65 && power < 85 ? '#22c55e' : power > 50 ? '#eab308' : '#ef4444'
-          }} />
-        </div>
-        <p className="text-white/60 text-xs mt-1">Sweet spot: 65-85%</p>
-      </div>
-      <p className="text-white font-bold text-lg min-h-[2rem]">{message}</p>
-      <p className="text-white/60 text-xs">{playerTurn ? 'Your shot' : 'CPU\'s shot'}</p>
-      {!gameOver ? (
-        <button onClick={shoot} className="px-8 py-3 bg-white text-orange-600 font-black rounded-xl text-lg hover:scale-105 active:scale-95 transition-transform shadow-lg">
-          🏀 {shooting ? 'RELEASE!' : 'Shoot!'}
-        </button>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-yellow-300 font-black text-xl">{playerScore > cpuScore ? 'YOU WIN! 🏆' : playerScore < cpuScore ? 'CPU Wins' : 'TIE!'}</p>
-          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30">Back to Sports</button>
+    <div className="flex flex-col items-center gap-3 p-4">
+      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
+      <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
+      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Click when the power bar is green!' : 'CPU shooting...'}</p>
+      {hud.gameOver && (
+        <div className="space-y-2 text-center">
+          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN! 🏆' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
+          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
         </div>
       )}
     </div>
