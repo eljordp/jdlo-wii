@@ -141,9 +141,9 @@ export default function WiiApp() {
             {channelTiles.map((tile, i) => (
               <motion.button
                 key={tile.id}
-                initial={{ opacity: 0, y: 30, scale: 0.8 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ delay: 0.1 + i * 0.08, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.05 + i * 0.04, duration: 0.3, ease: 'easeOut' }}
                 className="channel-tile flex flex-col items-center justify-center gap-3 md:gap-4"
                 onClick={() => setOpenChannel(tile.id)}
               >
