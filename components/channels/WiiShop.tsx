@@ -9,6 +9,7 @@ interface Props { onBack: () => void; theme: WiiTheme }
 interface Tier {
   name: string;
   price: string;
+  amount: number; // price in cents for Stripe
   timeline: string;
   description: string;
   features: string[];
@@ -32,17 +33,17 @@ const services: Service[] = [
     icon: Globe, popular: true,
     tiers: [
       {
-        name: 'Starter', price: '$300 - $800', timeline: '1-2 weeks',
+        name: 'Starter', price: '$500', amount: 50000, timeline: '1-2 weeks',
         description: 'A clean, simple website that gets you online fast. Perfect for showcasing your portfolio, resume, or small business. Fully mobile-responsive, lightning-fast loading, and ready to go live immediately. Includes your own domain name and professional hosting.',
         features: ['Clean & Simple', 'Mobile Friendly', 'Super Fast', 'Show Your Work', '+ $50/mo hosting'],
       },
       {
-        name: 'Professional', price: '$1,200 - $1,800', timeline: '2-4 weeks',
+        name: 'Professional', price: '$1,500', amount: 150000, timeline: '2-4 weeks',
         description: 'A polished, multi-page website with custom design, contact forms, blog setup, and SEO optimization. Perfect for growing businesses that need more than a landing page.',
         features: ['Everything in Starter', 'Multi-Page Design', 'Contact Forms', 'Blog Setup', 'SEO Optimization', 'Analytics Dashboard'],
       },
       {
-        name: 'Enterprise', price: '$2,000 - $3,500', timeline: '4-6 weeks',
+        name: 'Enterprise', price: '$2,750', amount: 275000, timeline: '4-6 weeks',
         description: 'A fully custom website with advanced functionality — e-commerce, booking systems, member areas, and integrations. Built for businesses ready to scale.',
         features: ['Everything in Pro', 'E-Commerce Ready', 'Booking System', 'Member Areas', 'Custom Integrations', 'Priority Support'],
       },
@@ -54,17 +55,17 @@ const services: Service[] = [
     icon: Palette, popular: true,
     tiers: [
       {
-        name: 'Starter', price: '$200 - $500', timeline: '3-5 days',
+        name: 'Starter', price: '$350', amount: 35000, timeline: '3-5 days',
         description: 'A simple but effective brand starter kit. Logo design, color palette, and basic typography selection to get your brand looking professional.',
         features: ['Logo Design', 'Color Palette', 'Typography Pick', '2 Revisions'],
       },
       {
-        name: 'Professional', price: '$800 - $1,200', timeline: '1-2 weeks',
+        name: 'Professional', price: '$1,000', amount: 100000, timeline: '1-2 weeks',
         description: 'Complete visual identity system with logo variations, brand guidelines document, social media templates, and business card design.',
         features: ['Everything in Starter', 'Logo Variations', 'Brand Guidelines', 'Social Templates', 'Business Cards', '4 Revisions'],
       },
       {
-        name: 'Enterprise', price: '$1,500 - $2,500', timeline: '2-3 weeks',
+        name: 'Enterprise', price: '$2,000', amount: 200000, timeline: '2-3 weeks',
         description: 'Full brand strategy and identity — positioning, messaging framework, complete visual system, and marketing collateral ready to launch.',
         features: ['Everything in Pro', 'Brand Strategy', 'Messaging Framework', 'Marketing Collateral', 'Presentation Templates', 'Unlimited Revisions'],
       },
@@ -76,17 +77,17 @@ const services: Service[] = [
     icon: Lightbulb, popular: true,
     tiers: [
       {
-        name: 'Starter', price: '$500 - $1,000', timeline: '1-2 sessions',
+        name: 'Starter', price: '$750', amount: 75000, timeline: '1-2 sessions',
         description: 'Focused strategy session to tackle your biggest challenge. Get clear action steps and a roadmap to move forward.',
         features: ['1-2 Hour Session', 'Action Plan', 'Follow-Up Email', 'Resource List'],
       },
       {
-        name: 'Professional', price: '$1,500 - $2,500', timeline: '2-4 weeks',
+        name: 'Professional', price: '$2,000', amount: 200000, timeline: '2-4 weeks',
         description: 'Multi-session advisory program with deep-dive analysis, ongoing support, and implementation guidance.',
         features: ['Everything in Starter', '4 Sessions', 'Business Audit', 'Sales Strategy', 'Weekly Check-ins', 'Slack Support'],
       },
       {
-        name: 'Enterprise', price: '$3,000 - $5,000', timeline: '1-3 months',
+        name: 'Enterprise', price: '$4,000', amount: 400000, timeline: '1-3 months',
         description: 'Comprehensive advisory retainer with hands-on involvement. I become your fractional strategist.',
         features: ['Everything in Pro', 'Monthly Retainer', 'On-Call Support', 'Team Training', 'Growth Planning', 'Priority Access'],
       },
@@ -98,17 +99,17 @@ const services: Service[] = [
     icon: Rocket, popular: true,
     tiers: [
       {
-        name: 'Starter', price: '$3,000 - $5,000', timeline: '2-4 weeks',
+        name: 'Starter', price: '$4,000', amount: 400000, timeline: '2-4 weeks',
         description: 'A focused MVP to validate your idea. Core features, clean UI, and deployment — everything you need to launch and test.',
         features: ['MVP Build', 'Core Features', 'Clean UI', 'Deployment', 'Basic Analytics'],
       },
       {
-        name: 'Professional', price: '$6,000 - $10,000', timeline: '4-8 weeks',
+        name: 'Professional', price: '$8,000', amount: 800000, timeline: '4-8 weeks',
         description: 'A production-ready app with full feature set, user authentication, database, API integrations, and admin dashboard.',
         features: ['Everything in Starter', 'User Auth', 'Database Design', 'API Integrations', 'Admin Dashboard', 'Testing Suite'],
       },
       {
-        name: 'Enterprise', price: '$12,000 - $20,000', timeline: '8-16 weeks',
+        name: 'Enterprise', price: '$15,000', amount: 1500000, timeline: '8-16 weeks',
         description: 'Enterprise-grade application with scalable architecture, real-time features, advanced security, and ongoing maintenance.',
         features: ['Everything in Pro', 'Scalable Architecture', 'Real-Time Features', 'Advanced Security', 'CI/CD Pipeline', 'Ongoing Maintenance'],
       },
@@ -120,17 +121,17 @@ const services: Service[] = [
     icon: Bot, popular: true,
     tiers: [
       {
-        name: 'Starter', price: '$800 - $1,500', timeline: '3-5 days',
+        name: 'Starter', price: '$1,000', amount: 100000, timeline: '3-5 days',
         description: 'Basic AI chatbot for your website that answers FAQs, captures leads, and sends notifications.',
         features: ['Website Chatbot', 'FAQ Handling', 'Lead Capture', 'Email Notifications', '+ $100/mo'],
       },
       {
-        name: 'Professional', price: '$2,000 - $3,000', timeline: '1-2 weeks',
+        name: 'Professional', price: '$2,500', amount: 250000, timeline: '1-2 weeks',
         description: 'Advanced AI assistant with phone integration, appointment booking, CRM sync, and custom training.',
         features: ['Everything in Starter', 'Phone Integration', 'Appointment Booking', 'CRM Sync', 'Custom Training', '+ $200/mo'],
       },
       {
-        name: 'Enterprise', price: '$3,500 - $5,000', timeline: '2-4 weeks',
+        name: 'Enterprise', price: '$4,000', amount: 400000, timeline: '2-4 weeks',
         description: 'Full AI receptionist system — multi-channel, intelligent routing, analytics dashboard, and white-label branding.',
         features: ['Everything in Pro', 'Multi-Channel', 'Smart Routing', 'Analytics Dashboard', 'White-Label', '+ $350/mo'],
       },
@@ -142,17 +143,17 @@ const services: Service[] = [
     icon: Construction, popular: false,
     tiers: [
       {
-        name: 'Starter', price: '$2,000 - $4,000', timeline: '1-2 weeks',
+        name: 'Starter', price: '$3,000', amount: 300000, timeline: '1-2 weeks',
         description: 'Technical audit and architecture plan for your existing system. Identify bottlenecks and get a clear roadmap.',
         features: ['System Audit', 'Architecture Plan', 'Tech Recommendations', 'Documentation'],
       },
       {
-        name: 'Professional', price: '$5,000 - $8,000', timeline: '2-4 weeks',
+        name: 'Professional', price: '$6,500', amount: 650000, timeline: '2-4 weeks',
         description: 'Complete system design with database schemas, API specs, infrastructure planning, and security review.',
         features: ['Everything in Starter', 'Database Design', 'API Specifications', 'Infrastructure Plan', 'Security Review', 'CI/CD Setup'],
       },
       {
-        name: 'Enterprise', price: '$10,000 - $15,000', timeline: '4-8 weeks',
+        name: 'Enterprise', price: '$12,000', amount: 1200000, timeline: '4-8 weeks',
         description: 'Enterprise architecture with implementation support, team onboarding, and ongoing technical advisory.',
         features: ['Everything in Pro', 'Implementation Support', 'Team Onboarding', 'Performance Tuning', 'Monitoring Setup', 'Technical Advisory'],
       },
@@ -164,17 +165,17 @@ const services: Service[] = [
     icon: Plug, popular: false,
     tiers: [
       {
-        name: 'Starter', price: '$400 - $800', timeline: '3-5 days',
+        name: 'Starter', price: '$600', amount: 60000, timeline: '3-5 days',
         description: 'Brand discovery and positioning statement. Clarify who you are, who you serve, and what makes you different.',
         features: ['Brand Discovery', 'Positioning Statement', 'Target Audience', 'Competitor Analysis'],
       },
       {
-        name: 'Professional', price: '$1,000 - $1,500', timeline: '1-2 weeks',
+        name: 'Professional', price: '$1,250', amount: 125000, timeline: '1-2 weeks',
         description: 'Complete brand identity with messaging, visual guidelines, and content voice documentation.',
         features: ['Everything in Starter', 'Brand Messaging', 'Visual Guidelines', 'Content Voice', 'Tagline Options', 'Brand Story'],
       },
       {
-        name: 'Enterprise', price: '$2,000 - $3,000', timeline: '2-3 weeks',
+        name: 'Enterprise', price: '$2,500', amount: 250000, timeline: '2-3 weeks',
         description: 'Full brand strategy with market research, brand architecture, and go-to-market plan.',
         features: ['Everything in Pro', 'Market Research', 'Brand Architecture', 'Go-To-Market Plan', 'Launch Strategy', 'Ongoing Support'],
       },
@@ -186,17 +187,17 @@ const services: Service[] = [
     icon: LayoutGrid, popular: false,
     tiers: [
       {
-        name: 'Starter', price: '$500 - $1,000', timeline: '3-5 days',
+        name: 'Starter', price: '$750', amount: 75000, timeline: '3-5 days',
         description: 'Content calendar setup with templates and scheduling tools. Get organized and start posting consistently.',
         features: ['Content Calendar', 'Post Templates', 'Scheduling Setup', 'Platform Strategy'],
       },
       {
-        name: 'Professional', price: '$1,200 - $1,800', timeline: '1-2 weeks',
+        name: 'Professional', price: '$1,500', amount: 150000, timeline: '1-2 weeks',
         description: 'Full content system with repurposing workflows, AI-assisted writing, and analytics tracking.',
         features: ['Everything in Starter', 'Repurposing Workflows', 'AI Writing Assist', 'Analytics Tracking', 'Hashtag Strategy', 'Engagement Plan'],
       },
       {
-        name: 'Enterprise', price: '$2,000 - $3,000', timeline: '2-3 weeks',
+        name: 'Enterprise', price: '$2,500', amount: 250000, timeline: '2-3 weeks',
         description: 'Complete content engine — strategy, creation workflows, distribution automation, and performance optimization.',
         features: ['Everything in Pro', 'Content Strategy', 'Distribution Automation', 'A/B Testing', 'Performance Reports', 'Monthly Optimization'],
       },
@@ -208,17 +209,17 @@ const services: Service[] = [
     icon: Search, popular: false,
     tiers: [
       {
-        name: 'Starter', price: '$300 - $600', timeline: '3-5 days',
+        name: 'Starter', price: '$450', amount: 45000, timeline: '3-5 days',
         description: 'Basic SEO health check — technical issues, keyword gaps, and quick wins to improve your search visibility.',
         features: ['Technical Audit', 'Keyword Gaps', 'Quick Wins List', 'Competitor Check'],
       },
       {
-        name: 'Professional', price: '$800 - $1,200', timeline: '1-2 weeks',
+        name: 'Professional', price: '$1,000', amount: 100000, timeline: '1-2 weeks',
         description: 'Comprehensive SEO analysis with keyword research, content strategy, and prioritized action plan.',
         features: ['Everything in Starter', 'Keyword Research', 'Content Strategy', 'Backlink Analysis', 'Action Plan', 'Monthly Tracking'],
       },
       {
-        name: 'Enterprise', price: '$1,500 - $2,500', timeline: '2-4 weeks',
+        name: 'Enterprise', price: '$2,000', amount: 200000, timeline: '2-4 weeks',
         description: 'Full SEO overhaul with implementation support, content optimization, and ongoing monitoring.',
         features: ['Everything in Pro', 'Implementation Support', 'Content Optimization', 'Local SEO', 'Schema Markup', 'Quarterly Reviews'],
       },
@@ -334,12 +335,12 @@ export default function WiiShop({ onBack }: Props) {
           {/* Bottom Buttons */}
           <div className="grid grid-cols-2 gap-3 pb-4">
             <a
-              href={`mailto:jordan@jdlo.online?subject=${encodeURIComponent(`${selected.name} - ${tier.name}`)}`}
+              href={`/checkout?service=${encodeURIComponent(selected.name)}&tier=${encodeURIComponent(tier.name)}&amount=${tier.amount}`}
               className="py-3.5 rounded-xl font-bold text-sm text-white text-center shadow-md transition-transform hover:scale-[1.02] active:scale-[0.98]"
               style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)' }}
             >
               <span className="flex items-center justify-center gap-2">
-                <ShoppingCart className="w-4 h-4" /> Add to Cart
+                <ShoppingCart className="w-4 h-4" /> Buy Now — {tier.price}
               </span>
             </a>
             <a
@@ -417,7 +418,7 @@ export default function WiiShop({ onBack }: Props) {
                 <p className="text-gray-400 text-xs mb-4 leading-relaxed">{service.desc}</p>
                 <div className="mt-auto w-full">
                   <div className="w-full py-2 rounded-lg text-center font-bold text-gray-600 text-sm bg-white/50">
-                    From {service.tiers[0].price.split(' - ')[0]}
+                    From {service.tiers[0].price}
                   </div>
                 </div>
               </button>
