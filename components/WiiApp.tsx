@@ -123,8 +123,8 @@ export default function WiiApp() {
             {/* Press Ⓐ */}
             <div className="flex items-center gap-3" style={{ animation: 'pulse-opacity 1.5s ease-in-out infinite' }}>
               <span className="text-white text-lg md:text-xl font-black tracking-wide">Press</span>
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full border-[3px] border-white flex items-center justify-center">
-                <span className="text-white font-black text-sm md:text-base">A</span>
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white flex items-center justify-center">
+                <span className="text-black font-black text-sm md:text-base">A</span>
               </div>
               <span className="text-white text-lg md:text-xl font-black tracking-wide">to continue.</span>
             </div>
