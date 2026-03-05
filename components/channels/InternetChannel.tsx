@@ -28,13 +28,15 @@ const cats = ['All', 'Getting Started', 'Pricing', 'Process', 'Services', 'After
 export default function InternetChannel({ onBack }: Props) {
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('All');
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<number | null>(1);
 
   const filtered = faqs.filter(f => {
     const matchCat = cat === 'All' || f.cat === cat;
     const matchQ = !query || f.q.toLowerCase().includes(query.toLowerCase()) || f.a.toLowerCase().includes(query.toLowerCase());
     return matchCat && matchQ;
   });
+
+  const activeFaq = faqs.find(f => f.id === openId);
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg, #dceef6 0%, #c4dfe9 100%)' }}>
@@ -49,15 +51,11 @@ export default function InternetChannel({ onBack }: Props) {
         <h1 className="text-gray-700 font-bold text-base">🌐 Internet Channel</h1>
       </div>
 
-      {/* Search */}
-      <div className="px-4 md:px-6 pb-2">
+      {/* Search + Filters */}
+      <div className="px-4 md:px-6 pb-2 flex items-center gap-2">
         <div
-          className="flex items-center gap-2 px-3 py-2 rounded-xl"
-          style={{
-            background: '#e4ecf2',
-            border: '2px solid rgba(255,255,255,0.85)',
-            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)',
-          }}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg flex-1 max-w-xs"
+          style={{ background: '#e4ecf2', border: '2px solid rgba(255,255,255,0.85)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}
         >
           <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
           <input
@@ -65,71 +63,83 @@ export default function InternetChannel({ onBack }: Props) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search..."
-            className="flex-1 bg-transparent outline-none text-gray-700 text-sm placeholder:text-gray-400"
+            className="flex-1 bg-transparent outline-none text-gray-700 text-sm placeholder:text-gray-400 min-w-0"
           />
-          {query && (
-            <button onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600 text-[10px] font-bold">
-              Clear
+          {query && <button onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600 text-[10px] font-bold">Clear</button>}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {cats.map(c => (
+            <button
+              key={c}
+              onClick={() => setCat(c)}
+              className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                cat === c ? 'bg-white text-gray-700 shadow-sm' : 'bg-white/40 text-gray-500 hover:bg-white/60'
+              }`}
+            >
+              {c}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="px-4 md:px-6 pb-2 flex flex-wrap gap-1.5">
-        {cats.map(c => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
-              cat === c ? 'bg-white text-gray-700 shadow-sm' : 'bg-white/40 text-gray-500 hover:bg-white/60'
-            }`}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
+      {/* Desktop: split layout / Mobile: accordion */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Questions list */}
+        <div className="flex-1 md:max-w-sm overflow-auto px-4 md:pl-6 md:pr-3 pb-6">
+          <div className="space-y-1">
+            {filtered.map(faq => (
+              <button
+                key={faq.id}
+                onClick={() => setOpenId(openId === faq.id ? null : faq.id)}
+                className={`w-full text-left rounded-lg px-3 py-2.5 transition-all ${
+                  openId === faq.id
+                    ? 'bg-white shadow-sm'
+                    : 'hover:bg-white/50'
+                }`}
+                style={openId === faq.id ? { border: '2px solid rgba(255,255,255,0.9)' } : { border: '2px solid transparent' }}
+              >
+                <p className={`font-bold text-[13px] leading-snug ${openId === faq.id ? 'text-gray-700' : 'text-gray-500'}`}>
+                  {faq.q}
+                </p>
+                <p className="text-gray-400 text-[10px] font-bold mt-0.5">{faq.cat}</p>
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p className="text-gray-400 text-sm font-semibold px-3 py-4">No results found.</p>
+            )}
+          </div>
 
-      {/* FAQs */}
-      <div className="flex-1 overflow-auto px-4 md:px-6 pb-6">
-        {query && (
-          <p className="text-gray-400 text-[10px] font-bold mb-1.5">
-            {filtered.length} result{filtered.length !== 1 ? 's' : ''}
-          </p>
-        )}
+          {/* Mobile: show answer below selected question */}
+          {activeFaq && (
+            <div className="md:hidden mt-3 rounded-xl p-4" style={{
+              background: 'linear-gradient(180deg, #dfe9f0 0%, #d0dce5 100%)',
+              border: '2px solid rgba(255,255,255,0.85)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+            }}>
+              <p className="text-gray-700 font-bold text-sm mb-2">{activeFaq.q}</p>
+              <p className="text-gray-600 text-[13px] leading-relaxed">{activeFaq.a}</p>
+            </div>
+          )}
+        </div>
 
-        <div className="space-y-1.5 max-w-2xl">
-          {filtered.map(faq => (
+        {/* Answer panel (desktop only) */}
+        <div className="hidden md:flex flex-1 overflow-auto px-3 pr-6 pb-6">
+          {activeFaq ? (
             <div
-              key={faq.id}
-              className="rounded-xl overflow-hidden"
+              className="w-full rounded-xl p-6 self-start"
               style={{
                 background: 'linear-gradient(180deg, #dfe9f0 0%, #d0dce5 100%)',
-                border: '2px solid rgba(255,255,255,0.8)',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                border: '2px solid rgba(255,255,255,0.85)',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
               }}
             >
-              <button
-                onClick={() => setOpenId(openId === faq.id ? null : faq.id)}
-                className="w-full flex items-center justify-between gap-2 px-3.5 py-3 text-left"
-              >
-                <p className="text-gray-700 font-bold text-[13px] leading-snug">{faq.q}</p>
-                {openId === faq.id
-                  ? <ChevronUp className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                  : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                }
-              </button>
-              {openId === faq.id && (
-                <div className="px-3.5 pb-3">
-                  <p className="text-gray-600 text-[13px] leading-relaxed">{faq.a}</p>
-                </div>
-              )}
+              <p className="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1">{activeFaq.cat}</p>
+              <h2 className="text-gray-700 font-bold text-lg mb-3">{activeFaq.q}</h2>
+              <p className="text-gray-600 text-sm leading-relaxed">{activeFaq.a}</p>
             </div>
-          ))}
-
-          {filtered.length === 0 && (
-            <div className="rounded-xl px-4 py-6 text-center" style={{ background: '#dfe9f0', border: '2px solid rgba(255,255,255,0.8)' }}>
-              <p className="text-gray-400 text-sm font-semibold">No results found.</p>
+          ) : (
+            <div className="w-full flex items-center justify-center">
+              <p className="text-gray-400 text-sm font-semibold">Select a question</p>
             </div>
           )}
         </div>
