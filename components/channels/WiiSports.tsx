@@ -19,90 +19,419 @@ const sports = [
   { id: 'arcade' as Sport, name: 'Arcade', emoji: '🕹️', color: 'from-purple-600 to-purple-800' },
 ];
 
-// ═══════ BASEBALL ═══════
+// ═══════ BASEBALL (Canvas) ═══════
 function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
-  const [inning, setInning] = useState(1);
-  const [outs, setOuts] = useState(0);
-  const [strikes, setStrikes] = useState(0);
-  const [balls, setBalls] = useState(0);
-  const [playerScore, setPlayerScore] = useState(0);
-  const [cpuScore, setCpuScore] = useState(0);
-  const [batting, setBatting] = useState(true);
-  const [message, setMessage] = useState('You\'re up to bat!');
-  const [gameOver, setGameOver] = useState(false);
-  const maxInnings = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 3 : 3;
-  const hitChance = difficulty === 'easy' ? 0.5 : difficulty === 'medium' ? 0.35 : 0.25;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hud, setHud] = useState({ player: 0, cpu: 0, inning: 1, outs: 0, strikes: 0, balls: 0, batting: true, gameOver: false, message: 'Tap to swing!' });
 
-  const swing = () => {
-    if (gameOver) return;
-    const rand = Math.random();
-    if (rand < hitChance) {
-      const runs = Math.random() < 0.2 ? 2 : 1;
-      if (batting) {
-        setPlayerScore(s => s + runs);
-        setMessage(runs > 1 ? 'DOUBLE! 🔥' : 'Base hit! ⚾');
-      } else {
-        setCpuScore(s => s + runs);
-        setMessage(runs > 1 ? 'CPU hits a double!' : 'CPU gets a hit');
-      }
-    } else if (rand < hitChance + 0.3) {
-      setStrikes(s => {
-        if (s + 1 >= 3) {
-          setMessage(batting ? 'Strike three — OUT!' : 'Struck \'em out!');
+  const maxInnings = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 5 : 9;
+  const sweetSpot = difficulty === 'easy' ? 0.18 : difficulty === 'medium' ? 0.12 : 0.08;
+  const pitchSpd = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.016 : 0.022;
+  const cpuHitRate = difficulty === 'easy' ? 0.22 : difficulty === 'medium' ? 0.33 : 0.45;
+
+  const gRef = useRef({
+    phase: 'idle' as 'idle' | 'pitch' | 'swing' | 'hit_fly' | 'result',
+    timer: 60, ballZ: 0, ballTargetX: 0,
+    swingAnim: 0, pitchAnim: 0,
+    hitBallT: 0, hitDestX: 0, hitDestY: 0,
+    resultText: '', resultColor: '#fff',
+    strikes: 0, balls: 0, outs: 0, inning: 1,
+    playerScore: 0, cpuScore: 0, batting: true, gameOver: false,
+    clicked: false,
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const W = 600, H = 420;
+    canvas.width = W; canvas.height = H;
+    const g = gRef.current;
+    let raf: number;
+
+    const startPitch = () => {
+      g.phase = 'pitch'; g.ballZ = 0; g.swingAnim = 0; g.pitchAnim = 1;
+      g.ballTargetX = W / 2 + (Math.random() - 0.5) * 70;
+      g.clicked = false;
+    };
+
+    const showResult = (text: string, color = '#fff') => {
+      g.resultText = text; g.resultColor = color;
+      g.phase = 'result'; g.timer = 50;
+    };
+
+    const advanceCount = (isStrike: boolean) => {
+      if (isStrike) {
+        g.strikes++;
+        if (g.strikes >= 3) {
+          g.strikes = 0; g.balls = 0;
           advanceOut();
-          return 0;
+          showResult('STRIKEOUT!', '#ff6b6b');
+          syncHud('Strikeout!');
+          return;
         }
-        setMessage('Strike!');
-        return s + 1;
-      });
-    } else {
-      setBalls(b => {
-        if (b + 1 >= 4) {
-          setMessage('Walk!');
-          if (batting) setPlayerScore(s => s + 1); else setCpuScore(s => s + 1);
-          return 0;
+      } else {
+        g.balls++;
+        if (g.balls >= 4) {
+          g.balls = 0; g.strikes = 0;
+          if (g.batting) g.playerScore++; else g.cpuScore++;
+          showResult('WALK!', '#90ee90');
+          syncHud('Walk!');
+          return;
         }
-        setMessage('Ball');
-        return b + 1;
-      });
-    }
-  };
-
-  const advanceOut = () => {
-    setStrikes(0); setBalls(0);
-    setOuts(o => {
-      if (o + 1 >= 3) {
-        if (!batting) {
-          if (inning >= maxInnings) { setGameOver(true); setMessage('Game Over!'); return 0; }
-          setInning(i => i + 1); setBatting(true); setMessage('New inning — you\'re batting!');
-        } else {
-          setBatting(false); setMessage('Side retired — CPU is batting');
-        }
-        return 0;
       }
-      return o + 1;
-    });
-  };
+      g.phase = 'idle'; g.timer = 30;
+      syncHud(isStrike ? 'Strike!' : 'Ball');
+    };
+
+    const advanceOut = () => {
+      g.outs++;
+      if (g.outs >= 3) {
+        g.outs = 0; g.strikes = 0; g.balls = 0;
+        if (!g.batting) {
+          if (g.inning >= maxInnings) {
+            g.gameOver = true;
+            showResult('GAME OVER', '#ffdd57');
+            syncHud('Game Over!');
+            return;
+          }
+          g.inning++; g.batting = true;
+        } else {
+          g.batting = false;
+        }
+      }
+    };
+
+    const scoreRuns = (runs: number) => {
+      if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
+    };
+
+    const syncHud = (msg: string) => {
+      setHud({ player: g.playerScore, cpu: g.cpuScore, inning: g.inning, outs: g.outs, strikes: g.strikes, balls: g.balls, batting: g.batting, gameOver: g.gameOver, message: msg });
+    };
+
+    const processHit = (timing: number) => {
+      const quality = 1 - timing / sweetSpot;
+      const r = Math.random();
+      g.strikes = 0; g.balls = 0;
+      if (quality > 0.7 && r < 0.25) {
+        scoreRuns(Math.random() < 0.3 ? 2 : 1);
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 60;
+        g.hitDestY = -40;
+        g.resultText = 'HOME RUN!'; g.resultColor = '#ffdd57';
+        syncHud('HOME RUN!');
+      } else if (quality > 0.3 || r < 0.35) {
+        const rr = Math.random();
+        if (rr < 0.1) { scoreRuns(1); g.resultText = 'TRIPLE!'; g.resultColor = '#90ee90'; }
+        else if (rr < 0.35) { scoreRuns(Math.random() < 0.4 ? 1 : 0); g.resultText = 'DOUBLE!'; g.resultColor = '#87ceeb'; }
+        else { scoreRuns(Math.random() < 0.25 ? 1 : 0); g.resultText = 'BASE HIT!'; g.resultColor = '#fff'; }
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 250;
+        g.hitDestY = H * 0.1 + Math.random() * 80;
+        syncHud(g.resultText.replace('!', ''));
+      } else {
+        advanceOut();
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 180;
+        g.hitDestY = H * 0.2 + Math.random() * 40;
+        g.resultText = 'FLY OUT!'; g.resultColor = '#ff6b6b';
+        syncHud('Fly out!');
+      }
+      g.phase = 'hit_fly'; g.hitBallT = 0;
+    };
+
+    const cpuAtBat = () => {
+      g.strikes = 0; g.balls = 0;
+      if (Math.random() < cpuHitRate) {
+        const rr = Math.random();
+        if (rr < 0.04) { scoreRuns(Math.random() < 0.3 ? 2 : 1); g.resultText = 'CPU HOME RUN!'; g.resultColor = '#ff6b6b'; g.hitDestY = -40; }
+        else if (rr < 0.15) { scoreRuns(1); g.resultText = 'CPU TRIPLE!'; g.resultColor = '#ff9b6b'; g.hitDestY = H * 0.1; }
+        else if (rr < 0.35) { scoreRuns(Math.random() < 0.4 ? 1 : 0); g.resultText = 'CPU DOUBLE!'; g.resultColor = '#ffb86b'; g.hitDestY = H * 0.15; }
+        else { scoreRuns(Math.random() < 0.2 ? 1 : 0); g.resultText = 'CPU HIT!'; g.resultColor = '#fff'; g.hitDestY = H * 0.2; }
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 250;
+        g.phase = 'hit_fly'; g.hitBallT = 0;
+        syncHud(g.resultText.replace('!', ''));
+      } else if (Math.random() < 0.4) {
+        advanceOut();
+        g.hitDestX = W / 2 + (Math.random() - 0.5) * 150;
+        g.hitDestY = H * 0.2;
+        g.resultText = 'CPU OUT!'; g.resultColor = '#90ee90';
+        g.phase = 'hit_fly'; g.hitBallT = 0;
+        syncHud('CPU out!');
+      } else {
+        advanceOut();
+        showResult('STRUCK OUT!', '#90ee90');
+        syncHud('CPU struck out!');
+      }
+    };
+
+    const onClick = () => { g.clicked = true; };
+    canvas.addEventListener('click', onClick);
+    canvas.addEventListener('touchstart', onClick, { passive: true });
+
+    // Init
+    g.phase = 'idle'; g.timer = 40;
+    g.strikes = 0; g.balls = 0; g.outs = 0; g.inning = 1;
+    g.playerScore = 0; g.cpuScore = 0; g.batting = true; g.gameOver = false;
+    syncHud('Step up to the plate!');
+
+    const loop = () => {
+      // ── Update ──
+      if (g.phase === 'idle') {
+        g.timer--;
+        if (g.timer <= 0) {
+          if (g.gameOver) return;
+          if (!g.batting) { cpuAtBat(); }
+          else startPitch();
+        }
+      } else if (g.phase === 'pitch') {
+        g.ballZ += pitchSpd;
+        g.pitchAnim = Math.max(0, g.pitchAnim - 0.04);
+        if (g.batting && g.clicked) {
+          g.clicked = false;
+          g.swingAnim = 1;
+          const timing = Math.abs(g.ballZ - 0.82);
+          if (timing < sweetSpot) {
+            processHit(timing);
+          } else if (timing < sweetSpot * 2.5) {
+            if (g.strikes < 2) g.strikes++;
+            g.phase = 'idle'; g.timer = 25;
+            syncHud('Foul ball!');
+          } else {
+            advanceCount(true);
+          }
+        }
+        if (g.ballZ >= 1.0 && g.phase === 'pitch') {
+          const inZone = Math.abs(g.ballTargetX - W / 2) < 35;
+          advanceCount(inZone);
+        }
+      } else if (g.phase === 'hit_fly') {
+        g.hitBallT += 0.018;
+        if (g.hitBallT >= 1) {
+          g.phase = 'result'; g.timer = 55;
+        }
+      } else if (g.phase === 'result') {
+        g.timer--;
+        if (g.timer <= 0) {
+          if (g.gameOver) { syncHud('Game Over!'); return; }
+          g.phase = 'idle'; g.timer = g.batting ? 35 : 25;
+          syncHud(g.batting ? 'You\'re batting!' : 'CPU at bat...');
+        }
+      }
+      g.swingAnim = Math.max(0, g.swingAnim - 0.06);
+
+      // ── Draw ──
+      // Sky gradient
+      const sky = ctx.createLinearGradient(0, 0, 0, H * 0.45);
+      sky.addColorStop(0, '#4a90d9'); sky.addColorStop(1, '#87ceeb');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+      // Crowd/stands
+      ctx.fillStyle = '#5a4a3a';
+      ctx.beginPath();
+      ctx.moveTo(0, H * 0.28); ctx.quadraticCurveTo(W / 2, H * 0.18, W, H * 0.28);
+      ctx.lineTo(W, H * 0.42); ctx.quadraticCurveTo(W / 2, H * 0.32, 0, H * 0.42);
+      ctx.fill();
+      // Crowd dots
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      for (let i = 0; i < 60; i++) {
+        const cx = (i / 60) * W; const cy = H * 0.3 + Math.sin(i * 1.7) * 15;
+        ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Outfield grass
+      const grass = ctx.createLinearGradient(0, H * 0.35, 0, H);
+      grass.addColorStop(0, '#2e8b57'); grass.addColorStop(0.5, '#3cb371'); grass.addColorStop(1, '#228b22');
+      ctx.fillStyle = grass;
+      ctx.beginPath();
+      ctx.moveTo(0, H * 0.38); ctx.quadraticCurveTo(W / 2, H * 0.22, W, H * 0.38);
+      ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+
+      // Mowing lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 8;
+      for (let i = 0; i < 12; i++) {
+        const y = H * 0.4 + i * 22;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      // Infield dirt diamond
+      ctx.fillStyle = '#c4956a';
+      ctx.beginPath();
+      ctx.moveTo(W / 2, H * 0.3);
+      ctx.lineTo(W / 2 + 130, H * 0.56);
+      ctx.lineTo(W / 2, H * 0.78);
+      ctx.lineTo(W / 2 - 130, H * 0.56);
+      ctx.closePath(); ctx.fill();
+
+      // Infield grass cutout
+      ctx.fillStyle = '#3cb371';
+      ctx.beginPath();
+      ctx.moveTo(W / 2, H * 0.36);
+      ctx.lineTo(W / 2 + 85, H * 0.53);
+      ctx.lineTo(W / 2, H * 0.67);
+      ctx.lineTo(W / 2 - 85, H * 0.53);
+      ctx.closePath(); ctx.fill();
+
+      // Pitcher's mound
+      ctx.fillStyle = '#b8845a';
+      ctx.beginPath(); ctx.ellipse(W / 2, H * 0.44, 22, 10, 0, 0, Math.PI * 2); ctx.fill();
+      // Rubber
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(W / 2 - 8, H * 0.44 - 2, 16, 4);
+
+      // Foul lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(W / 2, H * 0.78); ctx.lineTo(W / 2 - 300, H * 0.05);
+      ctx.moveTo(W / 2, H * 0.78); ctx.lineTo(W / 2 + 300, H * 0.05);
+      ctx.stroke();
+
+      // Bases (white diamonds)
+      const drawBase = (x: number, y: number) => {
+        ctx.fillStyle = '#fff'; ctx.save(); ctx.translate(x, y);
+        ctx.rotate(Math.PI / 4); ctx.fillRect(-5, -5, 10, 10); ctx.restore();
+      };
+      drawBase(W / 2 + 110, H * 0.53);  // 1B
+      drawBase(W / 2, H * 0.32);          // 2B
+      drawBase(W / 2 - 110, H * 0.53);   // 3B
+      // Home plate
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(W / 2, H * 0.8);
+      ctx.lineTo(W / 2 + 9, H * 0.78);
+      ctx.lineTo(W / 2 + 9, H * 0.76);
+      ctx.lineTo(W / 2 - 9, H * 0.76);
+      ctx.lineTo(W / 2 - 9, H * 0.78);
+      ctx.closePath(); ctx.fill();
+
+      // Pitcher (Mii-style)
+      const pY = H * 0.38;
+      ctx.fillStyle = '#f5deb3';
+      ctx.beginPath(); ctx.arc(W / 2, pY - 18, 7, 0, Math.PI * 2); ctx.fill(); // head
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(W / 2 - 5, pY - 11, 10, 16); // body
+      ctx.fillStyle = '#555';
+      ctx.fillRect(W / 2 - 5, pY + 5, 4, 10); ctx.fillRect(W / 2 + 1, pY + 5, 4, 10); // legs
+      // Pitching arm
+      if (g.pitchAnim > 0) {
+        ctx.strokeStyle = '#f5deb3'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        const armAngle = g.pitchAnim * Math.PI * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(W / 2 + 5, pY - 6);
+        ctx.lineTo(W / 2 + 5 + Math.cos(armAngle) * 14, pY - 6 - Math.sin(armAngle) * 14);
+        ctx.stroke(); ctx.lineCap = 'butt';
+      }
+
+      // Batter (Mii-style)
+      const bX = W / 2 + 28, bY = H * 0.76;
+      ctx.fillStyle = '#f5deb3';
+      ctx.beginPath(); ctx.arc(bX, bY - 20, 7, 0, Math.PI * 2); ctx.fill(); // head
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(bX - 5, bY - 13, 10, 16); // body
+      ctx.fillStyle = '#555';
+      ctx.fillRect(bX - 5, bY + 3, 4, 10); ctx.fillRect(bX + 1, bY + 3, 4, 10); // legs
+      // Helmet
+      ctx.fillStyle = '#cc3333';
+      ctx.beginPath(); ctx.arc(bX, bY - 22, 8, Math.PI, 0); ctx.fill();
+      // Bat
+      ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      const batRest = -Math.PI * 0.35;
+      const batSwing = batRest + g.swingAnim * Math.PI * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(bX - 8, bY - 8);
+      ctx.lineTo(bX - 8 + Math.cos(batSwing) * 32, bY - 8 + Math.sin(batSwing) * 32);
+      ctx.stroke(); ctx.lineCap = 'butt';
+
+      // Strike zone guide (when batting)
+      if (g.batting && (g.phase === 'idle' || g.phase === 'pitch')) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(W / 2 - 30, H * 0.66, 60, H * 0.1);
+        ctx.setLineDash([]);
+      }
+
+      // Ball during pitch
+      if (g.phase === 'pitch') {
+        const t = g.ballZ;
+        const bz = t;
+        const ballScreenX = W / 2 + (g.ballTargetX - W / 2) * bz;
+        const ballScreenY = H * 0.36 + (H * 0.74 - H * 0.36) * bz;
+        const ballR = 3 + bz * 7;
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.beginPath(); ctx.ellipse(ballScreenX + 2, ballScreenY + ballR + 3, ballR * 0.8, ballR * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+        // Ball
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(ballScreenX, ballScreenY, ballR, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(ballScreenX, ballScreenY, ballR * 0.7, -0.5, 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(ballScreenX, ballScreenY, ballR * 0.7, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
+      }
+
+      // Hit ball flying into field
+      if (g.phase === 'hit_fly') {
+        const t = g.hitBallT;
+        const startX = W / 2, startY = H * 0.74;
+        const bx = startX + (g.hitDestX - startX) * t;
+        const by = startY + (g.hitDestY - startY) * t - Math.sin(t * Math.PI) * 120;
+        const br = 10 - t * 7;
+        if (br > 1) {
+          ctx.fillStyle = 'rgba(0,0,0,0.1)';
+          ctx.beginPath(); ctx.arc(bx + 1, by + br + 2, br * 0.6, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+        }
+        // Trail
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(startX, startY); ctx.quadraticCurveTo(bx, by - 30, bx, by); ctx.stroke();
+      }
+
+      // Scoreboard (top)
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      const sbH = 36;
+      ctx.beginPath();
+      ctx.roundRect(W / 2 - 170, 6, 340, sbH, 8);
+      ctx.fill();
+      ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#90ee90'; ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 100, 28);
+      ctx.fillStyle = '#aaa'; ctx.fillText(`INN ${g.inning}`, W / 2 - 25, 28);
+      ctx.fillStyle = '#fff';
+      // Outs dots
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath(); ctx.arc(W / 2 + 25 + i * 14, 24, 4, 0, Math.PI * 2);
+        ctx.fillStyle = i < g.outs ? '#ff6b6b' : 'rgba(255,255,255,0.2)'; ctx.fill();
+      }
+      ctx.fillStyle = '#ff9b9b'; ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 110, 28);
+
+      // Count display
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath(); ctx.roundRect(W / 2 - 60, H - 32, 120, 24, 6); ctx.fill();
+      ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffdd57'; ctx.fillText(`${g.strikes}-${g.balls}`, W / 2 - 25, H - 16);
+      ctx.fillStyle = g.batting ? '#90ee90' : '#87ceeb';
+      ctx.fillText(g.batting ? 'BATTING' : 'PITCHING', W / 2 + 20, H - 16);
+
+      // Result banner
+      if ((g.phase === 'hit_fly' && g.hitBallT > 0.4) || g.phase === 'result') {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.beginPath(); ctx.roundRect(W / 2 - 110, H / 2 - 22, 220, 44, 10); ctx.fill();
+        ctx.font = 'bold 22px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = g.resultColor;
+        ctx.fillText(g.resultText, W / 2, H / 2 + 8);
+      }
+
+      if (!g.gameOver) raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
+  }, [difficulty, maxInnings, sweetSpot, pitchSpd, cpuHitRate]);
 
   return (
-    <div className="flex flex-col items-center gap-4 p-6 text-center">
-      <div className="flex gap-6 text-white">
-        <div><p className="text-xs opacity-60">YOU</p><p className="text-3xl font-black">{playerScore}</p></div>
-        <div><p className="text-xs opacity-60">INN</p><p className="text-3xl font-black">{inning}</p></div>
-        <div><p className="text-xs opacity-60">CPU</p><p className="text-3xl font-black">{cpuScore}</p></div>
-      </div>
-      <div className="flex gap-4 text-white text-sm">
-        <span>Outs: {outs}/3</span><span>Strikes: {strikes}</span><span>Balls: {balls}</span>
-      </div>
-      <p className="text-white font-bold text-lg min-h-[2rem]">{message}</p>
-      <p className="text-white/60 text-xs">{batting ? 'You\'re batting' : 'CPU is batting'}</p>
-      {!gameOver ? (
-        <button onClick={swing} className="px-8 py-3 bg-white text-red-600 font-black rounded-xl text-lg hover:scale-105 active:scale-95 transition-transform shadow-lg">
-          {batting ? '⚾ Swing!' : '⚾ Pitch!'}
-        </button>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-yellow-300 font-black text-xl">{playerScore > cpuScore ? 'YOU WIN! 🏆' : playerScore < cpuScore ? 'CPU Wins' : 'TIE!'}</p>
+    <div className="flex flex-col items-center gap-3 p-4">
+      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
+      <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
+      <p className="text-white/50 text-xs">{hud.batting ? 'Click/tap to swing when the ball is close!' : 'Watch the CPU bat...'}</p>
+      {hud.gameOver && (
+        <div className="space-y-2 text-center">
+          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN! 🏆' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
           <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
         </div>
       )}
