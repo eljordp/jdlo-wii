@@ -8,25 +8,44 @@ interface Props { onBack: () => void; theme: WiiTheme }
 
 interface Photo { id: number; url: string; category: string; alt: string }
 
+const B = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/69705b759c8dc226ae265997/';
+
 const photos: Photo[] = [
-  { id: 1, url: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&h=400&fit=crop', category: 'Gaming', alt: 'Gaming setup' },
-  { id: 2, url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&h=400&fit=crop', category: 'Gaming', alt: 'Retro gaming' },
-  { id: 3, url: 'https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=600&h=400&fit=crop', category: 'Creative', alt: 'Creative workspace' },
-  { id: 4, url: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=600&h=400&fit=crop', category: 'Creative', alt: 'Art supplies' },
-  { id: 5, url: 'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=600&h=400&fit=crop', category: 'Nature', alt: 'Mountains' },
-  { id: 6, url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=600&h=400&fit=crop', category: 'Nature', alt: 'Forest' },
-  { id: 7, url: 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=600&h=400&fit=crop', category: 'Urban', alt: 'City skyline' },
-  { id: 8, url: 'https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=600&h=400&fit=crop', category: 'Urban', alt: 'Downtown' },
-  { id: 9, url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&h=400&fit=crop', category: 'Tech', alt: 'Circuit board' },
-  { id: 10, url: 'https://images.unsplash.com/photo-1531297484001-80022131f5a1?w=600&h=400&fit=crop', category: 'Tech', alt: 'Laptop setup' },
-  { id: 11, url: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&h=400&fit=crop', category: 'Gaming', alt: 'Esports' },
-  { id: 12, url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=400&fit=crop', category: 'Nature', alt: 'Sunset peaks' },
-  { id: 13, url: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=600&h=400&fit=crop', category: 'Tech', alt: 'Team working' },
-  { id: 14, url: 'https://images.unsplash.com/photo-1496065187959-7f07b8353c55?w=600&h=400&fit=crop', category: 'Creative', alt: 'Design tools' },
-  { id: 15, url: 'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=600&h=400&fit=crop', category: 'Urban', alt: 'Night city' },
+  { id: 1, url: `${B}af179ee70_image.png`, category: 'Adventures', alt: 'Lake day with the crew' },
+  { id: 2, url: `${B}12b79f88f_image.png`, category: 'Adventures', alt: 'Beach vibes, no worries' },
+  { id: 3, url: `${B}f97897ac6_image.png`, category: 'Squad', alt: 'The squad linked up' },
+  { id: 4, url: `${B}2ee8ddcb2_image.png`, category: 'Life', alt: 'Throwback to the good days' },
+  { id: 5, url: `${B}b2da56def_image.png`, category: 'Life', alt: 'Halloween went crazy' },
+  { id: 6, url: `${B}88f2f3f42_image.png`, category: 'Life', alt: 'Night moves, city lights' },
+  { id: 7, url: `${B}b9df2764b_image.png`, category: 'Drip', alt: 'Hood up, locked in' },
+  { id: 8, url: `${B}7573a5d21_image.png`, category: 'Life', alt: 'Young Raiders, born with it' },
+  { id: 9, url: `${B}75b63b68e_image.png`, category: 'Life', alt: 'Quick store run' },
+  { id: 10, url: `${B}4b6dbfd71_image.png`, category: 'Adventures', alt: 'Palm trees and good energy' },
+  { id: 11, url: `${B}4bf5d8f06_image.png`, category: 'Adventures', alt: 'Universal Studios run' },
+  { id: 12, url: `${B}070611cda_image.png`, category: 'Drip', alt: 'Posted up with the whip' },
+  { id: 13, url: `${B}fe27f9341_image.png`, category: 'Life', alt: 'Money moves only' },
+  { id: 14, url: `${B}39df25997_image.png`, category: 'Life', alt: 'Vineyard work, real hours' },
+  { id: 15, url: `${B}d5f039ffb_image.png`, category: 'Adventures', alt: 'Dino attack at the museum' },
+  { id: 16, url: `${B}e11b820b2_image.png`, category: 'Family', alt: 'The little one' },
+  { id: 17, url: `${B}4ab726703_image.png`, category: 'Adventures', alt: 'Farm life, different pace' },
+  { id: 18, url: `${B}0ac9313e2_image.png`, category: 'Drip', alt: 'Mirror check before stepping out' },
+  { id: 19, url: `${B}18559c7bf_image.png`, category: 'Drip', alt: 'Corvette dreams' },
+  { id: 20, url: `${B}58acf053c_image.png`, category: 'Adventures', alt: 'Theme park with the fam' },
+  { id: 21, url: `${B}0dbb6c337_image.png`, category: 'Life', alt: 'Baseball team days' },
+  { id: 22, url: `${B}c2e173e43_image.png`, category: 'Life', alt: 'Batman mode activated' },
+  { id: 23, url: `${B}e30d6783b_image.png`, category: 'Life', alt: 'Peace out, always' },
+  { id: 24, url: `${B}b0a3ac17a_image.png`, category: 'Squad', alt: 'Squad goals, no cap' },
+  { id: 25, url: `${B}33387654d_image.png`, category: 'Life', alt: 'Shopping spree with the team' },
+  { id: 26, url: `${B}a478626d9_B299E392-B142-4CD5-BB5E-8AFEEFCBD14C.jpeg`, category: 'Drip', alt: 'Suited up, business ready' },
+  { id: 27, url: `${B}93d8ce6d4_image.png`, category: 'Squad', alt: 'Burberry boys' },
+  { id: 28, url: `${B}d8a64add0_image.png`, category: 'Life', alt: 'Graduation day, we made it' },
+  { id: 29, url: `${B}841333415_image.png`, category: 'Squad', alt: 'Best friend, day one' },
+  { id: 30, url: `${B}654292d81_image.png`, category: 'Adventures', alt: 'Boat trip, open water' },
+  { id: 31, url: `${B}acf11c96c_image.png`, category: 'Life', alt: 'Kabob spot hit different' },
+  { id: 32, url: `${B}ea4ef8bc1_image.png`, category: 'Family', alt: 'Diggin in my butt' },
 ];
 
-const categories = ['All', 'Gaming', 'Creative', 'Nature', 'Urban', 'Tech'];
+const categories = ['All', 'Life', 'Squad', 'Adventures', 'Drip', 'Family'];
 
 export default function PhotoChannel({ onBack }: Props) {
   const [cat, setCat] = useState('All');
@@ -131,7 +150,7 @@ export default function PhotoChannel({ onBack }: Props) {
             <ChevronR className="w-6 h-6" />
           </button>
           <img
-            src={activePhoto.url.replace('w=600&h=400', 'w=1200&h=800')}
+            src={activePhoto.url}
             alt={activePhoto.alt}
             className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
             onClick={e => e.stopPropagation()}
