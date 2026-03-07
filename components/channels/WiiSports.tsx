@@ -37,6 +37,13 @@ const BASE_POS = [
 ];
 
 // ═══════ BASEBALL (Canvas) ═══════
+type PitchType = 'fastball' | 'curve' | 'changeup';
+const PITCH_INFO: Record<PitchType, { speed: number; move: number; name: string; color: string }> = {
+  fastball: { speed: 1.3, move: 0, name: 'Fastball', color: '#ef4444' },
+  curve: { speed: 0.75, move: 1.5, name: 'Curveball', color: '#3b82f6' },
+  changeup: { speed: 0.6, move: 0.5, name: 'Changeup', color: '#22c55e' },
+};
+
 function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState({ player: 0, cpu: 0, inning: 1, outs: 0, strikes: 0, balls: 0, batting: true, gameOver: false, message: 'Tap to swing!' });
@@ -47,7 +54,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
   const cpuContact = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.5 : 0.65;
 
   const gRef = useRef({
-    phase: 'idle' as 'idle' | 'pitch' | 'hit_fly' | 'result',
+    phase: 'idle' as 'idle' | 'pitch' | 'hit_fly' | 'result' | 'foul_fly',
     timer: 60, ballZ: 0, ballTargetX: 0,
     swingAnim: 0, pitchAnim: 0,
     hitBallT: 0, hitDestX: 0, hitDestY: 0,
@@ -57,6 +64,16 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
     bases: [false, false, false] as boolean[],
     clicked: false, cpuDecided: false, cpuSwingZ: 0.8,
     activeFielder: -1, fielderAnimT: 0,
+    // New features
+    pitchType: 'fastball' as PitchType,
+    pitchCurveOffset: 0,
+    timingIndicator: 0, // 0-1, shows how close to sweet spot
+    foulBallX: 0, foulBallY: 0, foulBallVX: 0, foulBallVY: 0,
+    particles: [] as { x: number; y: number; vx: number; vy: number; life: number; color: string }[],
+    crowdExcitement: 0, // 0-1
+    streak: 0, // consecutive hits
+    lastHitQuality: '',
+    shakeTimer: 0, shakeIntensity: 0,
   });
 
   useEffect(() => {
@@ -77,6 +94,23 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       g.ballTargetX = W / 2 + (Math.random() - 0.5) * 70;
       g.clicked = false; g.cpuDecided = false;
       g.cpuSwingZ = 0.62 + Math.random() * 0.25;
+      g.timingIndicator = 0;
+      g.pitchCurveOffset = 0;
+      // Pick pitch type based on difficulty
+      const pitchTypes: PitchType[] = ['fastball', 'curve', 'changeup'];
+      g.pitchType = difficulty === 'easy' ? 'fastball' : pitchTypes[Math.floor(Math.random() * pitchTypes.length)];
+    };
+
+    const spawnParticles = (x: number, y: number, count: number, color: string) => {
+      for (let i = 0; i < count; i++) {
+        g.particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 6,
+          vy: -Math.random() * 4 - 1,
+          life: 20 + Math.random() * 15,
+          color,
+        });
+      }
     };
 
     const showResult = (text: string, color = '#fff') => {
@@ -161,6 +195,8 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       const r = Math.random();
       const tag = cpu ? 'CPU ' : '';
       g.strikes = 0; g.balls = 0;
+      g.shakeTimer = 6; g.shakeIntensity = quality > 0.5 ? 4 : 2;
+      spawnParticles(W / 2, H * 0.74, 6, '#fff');
 
       if (quality > 0.7 && r < 0.2) {
         const runs = advanceRunners(4);
@@ -169,6 +205,11 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         g.activeFielder = -1;
         g.resultText = `${tag}HOME RUN!`; g.resultColor = '#ffdd57';
         syncHud(`${tag}HOME RUN! ${runs} run${runs !== 1 ? 's' : ''}!`);
+        g.crowdExcitement = 1;
+        g.shakeTimer = 15; g.shakeIntensity = 6;
+        spawnParticles(W / 2, H * 0.74, 20, '#ffdd57');
+        if (!cpu) g.streak++;
+        g.lastHitQuality = 'HOME RUN';
       } else if (quality > 0.5 && r < 0.12) {
         const runs = advanceRunners(3);
         if (g.batting) g.playerScore += runs; else g.cpuScore += runs;
@@ -227,10 +268,23 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       if (g.phase === 'idle') {
         g.timer--;
         if (g.timer <= 0 && !g.gameOver) startPitch();
+      } else if (g.phase === 'foul_fly') {
+        g.foulBallX += g.foulBallVX;
+        g.foulBallY += g.foulBallVY;
+        g.foulBallVY += 0.25;
+        g.timer--;
+        if (g.timer <= 0) { g.phase = 'idle'; g.timer = 30; }
       } else if (g.phase === 'pitch') {
-        g.ballZ += pitchSpd;
+        const pi = PITCH_INFO[g.pitchType];
+        g.ballZ += pitchSpd * pi.speed;
+        g.pitchCurveOffset = Math.sin(g.ballZ * Math.PI) * pi.move * 20;
         g.pitchAnim = Math.max(0, g.pitchAnim - 0.04);
         // Player swing
+        // Timing indicator for player
+        if (g.batting) {
+          const dist = Math.abs(g.ballZ - 0.82);
+          g.timingIndicator = Math.max(0, 1 - dist / 0.3);
+        }
         if (g.batting && g.clicked) {
           g.clicked = false;
           const timing = Math.abs(g.ballZ - 0.82);
@@ -238,9 +292,15 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
           else if (timing < sweetSpot * 2.5 && g.ballZ > 0.3) {
             g.swingAnim = 1;
             if (g.strikes < 2) g.strikes++;
-            g.phase = 'idle'; g.timer = 25;
+            // Foul ball flight animation
+            g.foulBallX = W / 2;
+            g.foulBallY = H * 0.74;
+            g.foulBallVX = (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4);
+            g.foulBallVY = -6 - Math.random() * 3;
+            g.phase = 'foul_fly'; g.timer = 40;
+            spawnParticles(W / 2, H * 0.74, 4, '#aaa');
             syncHud(`Foul ball! (${g.strikes}-${g.balls})`);
-          } else { g.swingAnim = 1; advanceCount(true); }
+          } else { g.swingAnim = 1; g.streak = 0; advanceCount(true); }
         }
         // CPU swing
         if (!g.batting && !g.cpuDecided && g.ballZ >= g.cpuSwingZ) {
@@ -269,8 +329,20 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         }
       }
       g.swingAnim = Math.max(0, g.swingAnim - 0.05);
+      if (g.shakeTimer > 0) g.shakeTimer--;
+      g.crowdExcitement = Math.max(0, g.crowdExcitement - 0.005);
+
+      // Update particles
+      g.particles = g.particles.filter(p => {
+        p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
+        return p.life > 0;
+      });
 
       // ── DRAW ──
+      ctx.save();
+      if (g.shakeTimer > 0) {
+        ctx.translate((Math.random() - 0.5) * g.shakeIntensity, (Math.random() - 0.5) * g.shakeIntensity);
+      }
       // Sky
       const sky = ctx.createLinearGradient(0, 0, 0, H * 0.45);
       sky.addColorStop(0, '#4a90d9'); sky.addColorStop(1, '#87ceeb');
@@ -284,8 +356,10 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       ctx.fill();
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
       for (let i = 0; i < 80; i++) {
-        const cx = (i / 80) * W, cy = H * 0.3 + Math.sin(i * 1.5) * 18 + Math.cos(i * 2.3) * 6;
-        ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+        const crowdBounce = g.crowdExcitement * Math.sin(Date.now() / 100 + i * 0.5) * 4;
+        const cx = (i / 80) * W, cy = H * 0.3 + Math.sin(i * 1.5) * 18 + Math.cos(i * 2.3) * 6 + crowdBounce;
+        ctx.fillStyle = g.crowdExcitement > 0.5 ? `hsl(${(i * 30 + Date.now() / 10) % 360}, 70%, 70%)` : 'rgba(255,255,255,0.12)';
+        ctx.beginPath(); ctx.arc(cx, cy, 2.5 + g.crowdExcitement, 0, Math.PI * 2); ctx.fill();
       }
 
       // Outfield grass
@@ -415,16 +489,57 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       // Ball during pitch
       if (g.phase === 'pitch') {
         const bz = g.ballZ;
-        const bsx = W / 2 + (g.ballTargetX - W / 2) * bz;
+        const bsx = W / 2 + (g.ballTargetX - W / 2) * bz + g.pitchCurveOffset;
         const bsy = H * 0.36 + (H * 0.74 - H * 0.36) * bz;
         const br = 3 + bz * 7;
+        // Ball trail
+        const pi = PITCH_INFO[g.pitchType];
+        ctx.strokeStyle = `${pi.color}40`;
+        ctx.lineWidth = br * 0.6;
+        ctx.beginPath();
+        for (let t = Math.max(0, bz - 0.15); t < bz; t += 0.02) {
+          const tx = W / 2 + (g.ballTargetX - W / 2) * t + Math.sin(t * Math.PI) * pi.move * 20;
+          const ty = H * 0.36 + (H * 0.74 - H * 0.36) * t;
+          if (t === Math.max(0, bz - 0.15)) ctx.moveTo(tx, ty);
+          else ctx.lineTo(tx, ty);
+        }
+        ctx.stroke();
+        // Shadow
         ctx.fillStyle = 'rgba(0,0,0,0.12)';
         ctx.beginPath(); ctx.ellipse(bsx + 2, bsy + br + 3, br * 0.8, br * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+        // Ball
         ctx.fillStyle = '#fff';
         ctx.beginPath(); ctx.arc(bsx, bsy, br, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, -0.5, 0.5); ctx.stroke();
         ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
+        // Pitch type label
+        ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = pi.color;
+        ctx.fillText(pi.name, W / 2, H * 0.35);
+      }
+
+      // Foul ball flight
+      if (g.phase === 'foul_fly') {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(g.foulBallX, g.foulBallY, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillText('FOUL!', W / 2, H * 0.5);
+      }
+
+      // Timing indicator (when batting)
+      if (g.batting && g.phase === 'pitch' && g.timingIndicator > 0.2) {
+        const tAlpha = g.timingIndicator;
+        const tColor = tAlpha > 0.8 ? '#22c55e' : tAlpha > 0.5 ? '#eab308' : '#ef4444';
+        ctx.strokeStyle = tColor;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = tAlpha * 0.6;
+        ctx.beginPath();
+        ctx.arc(W / 2, H * 0.72, 20 + (1 - tAlpha) * 20, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
       }
 
       // Hit ball flying
@@ -442,6 +557,21 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
           ctx.fillStyle = '#fff';
           ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
         }
+      }
+
+      // Particles
+      for (const p of g.particles) {
+        ctx.globalAlpha = p.life / 30;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      // Streak indicator
+      if (g.streak >= 2 && g.batting) {
+        ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillText(`${g.streak} Hit Streak!`, W - 15, H - 32);
       }
 
       // ── SCOREBOARD HUD ──
@@ -503,6 +633,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         ctx.fillText(g.resultText, W / 2, H / 2 + 8);
       }
 
+      ctx.restore(); // screen shake
       if (!g.gameOver) raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -510,13 +641,19 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
   }, [difficulty, maxInnings, sweetSpot, pitchSpd, cpuContact]);
 
   return (
-    <div className="flex flex-col items-center gap-3 p-4">
+    <div className="flex flex-col items-center gap-2 p-2">
       <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
       <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
-      <p className="text-white/50 text-xs">{hud.batting ? 'Click/tap to swing when the ball is close!' : 'Watch the CPU bat...'}</p>
+      <div className="flex gap-2 justify-center">
+        <button
+          onPointerDown={() => { gRef.current.clicked = true; }}
+          className="px-8 py-3 bg-white text-red-600 font-bold rounded-xl hover:scale-105 active:scale-90 transition-transform shadow-lg text-sm"
+        >SWING!</button>
+      </div>
+      <p className="text-white/50 text-xs">{hud.batting ? 'Swing when the timing circle turns green!' : 'Watch the CPU bat...'}</p>
       {hud.gameOver && (
         <div className="space-y-2 text-center">
-          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN! 🏆' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
+          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN!' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
           <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
         </div>
       )}
@@ -527,10 +664,15 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
 // Shot positions: x, y (canvas coords), point value
 const SHOT_SPOTS = [
   { x: 260, y: 320, pts: 2, label: 'Free Throw' },
-  { x: 180, y: 330, pts: 3, label: '3-Point' },
+  { x: 180, y: 330, pts: 3, label: '3-Point Left' },
   { x: 100, y: 340, pts: 3, label: 'Deep Three' },
   { x: 320, y: 310, pts: 2, label: 'Mid-Range' },
-  { x: 150, y: 350, pts: 3, label: 'Corner 3' },
+  { x: 150, y: 370, pts: 3, label: 'Corner 3' },
+  { x: 350, y: 340, pts: 2, label: 'Elbow' },
+  { x: 400, y: 280, pts: 2, label: 'Paint' },
+  { x: 440, y: 250, pts: 2, label: 'Layup', dunk: true },
+  { x: 200, y: 290, pts: 3, label: 'Wing 3' },
+  { x: 80, y: 370, pts: 3, label: 'Deep Corner' },
 ];
 
 // ═══════ BASKETBALL (Canvas) ═══════
@@ -543,14 +685,24 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
   const gameTime = difficulty === 'easy' ? 50 : difficulty === 'medium' ? 40 : 30;
 
   const gRef = useRef({
-    phase: 'idle' as 'idle' | 'aiming' | 'flying' | 'result',
+    phase: 'idle' as 'idle' | 'aiming' | 'release' | 'flying' | 'result' | 'moving' | 'dunk',
     timer: 0, power: 0, powerDir: 1,
+    releaseAccuracy: 50, releaseDir: 2,
     ballT: 0, ballStartX: 0, ballStartY: 0,
     ballEndX: 0, ballEndY: 0, ballArcH: 0,
     made: false, resultText: '', resultColor: '#fff',
     playerScore: 0, cpuScore: 0, playerTurn: true,
     timeLeft: 0, gameOver: false, shotSpot: 0,
     rimBounce: 0, netAnim: 0, clicked: false,
+    // New features
+    streak: 0, onFire: false,
+    playerX: 260, playerY: 320, targetSpot: 0,
+    moveProgress: 0,
+    particles: [] as { x: number; y: number; vx: number; vy: number; life: number; color: string }[],
+    dunkPhase: 0,
+    shotClock: 0,
+    perfectShots: 0,
+    swish: false,
   });
 
   useEffect(() => {
@@ -568,12 +720,14 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       setHud({ player: g.playerScore, cpu: g.cpuScore, time: Math.ceil(Math.max(0, g.timeLeft)), playerTurn: g.playerTurn, gameOver: g.gameOver, message: msg });
     };
 
-    const launchBall = (accuracy: number) => {
+    const launchBall = (accuracy: number, releaseQuality: number) => {
       const spot = SHOT_SPOTS[g.shotSpot];
-      g.ballStartX = spot.x + 10; g.ballStartY = spot.y - 28;
-      g.made = accuracy < threshold;
+      g.ballStartX = g.playerX + 10; g.ballStartY = g.playerY - 28;
+      const fireBonus = g.onFire ? threshold * 0.3 : 0;
+      g.made = (accuracy + releaseQuality * 0.5) < (threshold + fireBonus);
+      g.swish = g.made && accuracy < threshold * 0.3;
       if (g.made) {
-        g.ballEndX = rimX - 12 + (Math.random() - 0.5) * 8;
+        g.ballEndX = rimX - 12 + (Math.random() - 0.5) * 6;
         g.ballEndY = rimY;
         g.ballArcH = 130 + Math.random() * 30;
       } else {
@@ -585,15 +739,31 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       g.phase = 'flying'; g.ballT = 0;
     };
 
+    const spawnBBParticles = (x: number, y: number, count: number, color: string) => {
+      for (let i = 0; i < count; i++) {
+        g.particles.push({ x, y, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 3 - 1, life: 20 + Math.random() * 10, color });
+      }
+    };
+
     const shotResult = () => {
       const spot = SHOT_SPOTS[g.shotSpot];
       const tag = g.playerTurn ? '' : 'CPU ';
       if (g.made) {
-        if (g.playerTurn) g.playerScore += spot.pts; else g.cpuScore += spot.pts;
-        g.resultText = `${tag}${spot.pts === 3 ? 'THREE!' : 'BUCKET!'}`;
-        g.resultColor = '#ffdd57'; g.netAnim = 1;
-        syncHud(`${tag}${spot.pts}-pointer!`);
+        const pts = spot.pts;
+        if (g.playerTurn) g.playerScore += pts; else g.cpuScore += pts;
+        if (g.playerTurn) {
+          g.streak++;
+          if (g.streak >= 3) g.onFire = true;
+          g.perfectShots++;
+        }
+        g.netAnim = 1;
+        spawnBBParticles(rimX - 12, rimY + 20, 8, g.onFire && g.playerTurn ? '#f97316' : '#ffdd57');
+        const msgs = g.swish ? `${tag}SWISH!` : pts === 3 ? `${tag}THREE!` : `${tag}BUCKET!`;
+        g.resultText = g.onFire && g.playerTurn ? `ON FIRE! ${msgs}` : msgs;
+        g.resultColor = g.onFire && g.playerTurn ? '#f97316' : '#ffdd57';
+        syncHud(`${tag}${pts}-pointer!${g.streak >= 3 && g.playerTurn ? ' ON FIRE!' : ''}`);
       } else {
+        if (g.playerTurn) { g.streak = 0; g.onFire = false; }
         g.resultText = `${tag}MISS!`; g.resultColor = '#ff6b6b'; g.rimBounce = 1;
         syncHud(`${tag}Missed!`);
       }
@@ -602,10 +772,10 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
 
     const nextTurn = () => {
       g.playerTurn = !g.playerTurn;
-      g.shotSpot = (g.shotSpot + 1) % SHOT_SPOTS.length;
-      g.phase = 'idle'; g.timer = 25;
+      g.targetSpot = (g.shotSpot + 1 + Math.floor(Math.random() * 2)) % SHOT_SPOTS.length;
+      g.phase = 'moving'; g.moveProgress = 0;
       g.rimBounce = 0; g.netAnim = 0;
-      syncHud(g.playerTurn ? 'Your shot!' : 'CPU shooting...');
+      syncHud(g.playerTurn ? 'Moving to spot...' : 'CPU moving...');
     };
 
     const onClick = () => { g.clicked = true; };
@@ -629,28 +799,74 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
         }
       }
 
+      // Update particles
+      g.particles = g.particles.filter(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; return p.life > 0; });
+
       // UPDATE
-      if (g.phase === 'idle') {
+      if (g.phase === 'moving') {
+        g.moveProgress += 0.04;
+        const from = SHOT_SPOTS[g.shotSpot];
+        const to = SHOT_SPOTS[g.targetSpot];
+        g.playerX = from.x + (to.x - from.x) * Math.min(1, g.moveProgress);
+        g.playerY = from.y + (to.y - from.y) * Math.min(1, g.moveProgress);
+        if (g.moveProgress >= 1) {
+          g.shotSpot = g.targetSpot;
+          g.playerX = to.x; g.playerY = to.y;
+          g.phase = 'idle'; g.timer = 15;
+          syncHud(g.playerTurn ? 'Click to shoot!' : 'CPU shooting...');
+        }
+      } else if (g.phase === 'idle') {
         g.timer--;
         if (g.timer <= 0 && !g.gameOver) {
-          if (g.playerTurn) {
-            g.phase = 'aiming'; g.power = 0; g.powerDir = 1;
-            syncHud('Click when the bar is green!');
+          const spot = SHOT_SPOTS[g.shotSpot];
+          // Dunk check
+          if (g.playerTurn && (spot as { dunk?: boolean }).dunk) {
+            g.phase = 'aiming'; g.power = 0; g.powerDir = 1.8;
+            syncHud('Click to DUNK!');
+          } else if (g.playerTurn) {
+            g.phase = 'aiming'; g.power = 0; g.powerDir = 1.4;
+            syncHud('Click for power, then accuracy!');
           } else {
             const acc = Math.random() < cpuMake ? Math.random() * threshold * 0.8 : threshold + Math.random() * 20;
-            launchBall(acc);
+            launchBall(acc, threshold * 0.3);
           }
         }
-        if (g.playerTurn && g.clicked && g.timer > 0) {
-          g.clicked = false; g.timer = 0;
-        }
+        if (g.playerTurn && g.clicked && g.timer > 0) { g.clicked = false; g.timer = 0; }
       } else if (g.phase === 'aiming') {
         g.power += g.powerDir * 1.4;
         if (g.power >= 100) { g.power = 100; g.powerDir = -1; }
         if (g.power <= 0) { g.power = 0; g.powerDir = 1; }
         if (g.clicked) {
           g.clicked = false;
-          launchBall(Math.abs(g.power - 75));
+          const spot = SHOT_SPOTS[g.shotSpot];
+          if ((spot as { dunk?: boolean }).dunk && Math.abs(g.power - 75) < threshold) {
+            // Dunk!
+            g.phase = 'dunk'; g.dunkPhase = 0;
+          } else {
+            g.phase = 'release'; g.releaseAccuracy = 50; g.releaseDir = 2.5;
+          }
+        }
+      } else if (g.phase === 'release') {
+        g.releaseAccuracy += g.releaseDir * 2;
+        if (g.releaseAccuracy >= 100) { g.releaseAccuracy = 100; g.releaseDir = -2.5; }
+        if (g.releaseAccuracy <= 0) { g.releaseAccuracy = 0; g.releaseDir = 2.5; }
+        if (g.clicked) {
+          g.clicked = false;
+          launchBall(Math.abs(g.power - 75), Math.abs(g.releaseAccuracy - 50));
+        }
+      } else if (g.phase === 'dunk') {
+        g.dunkPhase += 0.03;
+        if (g.dunkPhase >= 1) {
+          g.made = true; g.swish = false;
+          const spot = SHOT_SPOTS[g.shotSpot];
+          if (g.playerTurn) { g.playerScore += spot.pts; g.streak++; if (g.streak >= 3) g.onFire = true; }
+          else g.cpuScore += spot.pts;
+          g.resultText = g.playerTurn ? 'SLAM DUNK!' : 'CPU DUNK!';
+          g.resultColor = '#f97316';
+          g.netAnim = 1; g.rimBounce = 0.8;
+          spawnBBParticles(rimX - 12, rimY, 15, '#f97316');
+          syncHud(g.playerTurn ? 'SLAM DUNK!' : 'CPU Dunks!');
+          g.phase = 'result'; g.timer = 55;
         }
       } else if (g.phase === 'flying') {
         g.ballT += 0.02;
@@ -751,6 +967,32 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       ctx.fillStyle = 'rgba(255,255,255,0.08)';
       ctx.beginPath(); ctx.ellipse(spot.x, spot.y, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
 
+      // On-fire effect around rim
+      if (g.onFire && g.playerTurn) {
+        ctx.strokeStyle = `rgba(249,115,22,${0.3 + 0.2 * Math.sin(Date.now() / 100)})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(rimX - 14, rimY, 30 + Math.sin(Date.now() / 150) * 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Dunk animation
+      if (g.phase === 'dunk') {
+        const t = g.dunkPhase;
+        const sx = g.playerX, sy = g.playerY;
+        const ex = rimX - 15, ey = rimY;
+        const mx2 = sx + (ex - sx) * t;
+        const my2 = sy + (ey - sy) * t - Math.sin(t * Math.PI) * 100;
+        // Dunk player
+        ctx.fillStyle = '#3b82f6';
+        ctx.fillRect(mx2 - 6, my2 - 12, 12, 17);
+        ctx.fillStyle = '#f5deb3';
+        ctx.beginPath(); ctx.arc(mx2, my2 - 18, 7, 0, Math.PI * 2); ctx.fill();
+        // Ball in hand
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath(); ctx.arc(mx2 + 8, my2 - 24, 6, 0, Math.PI * 2); ctx.fill();
+      }
+
       // Mii character
       const drawMii = (mx: number, my: number, jersey: string, shooting: boolean) => {
         ctx.fillStyle = '#444';
@@ -796,8 +1038,23 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
         drawBall(rimX - 14, rimY + dropT * 42, 5 - dropT * 2);
       }
 
+      // Particles
+      for (const p of g.particles) {
+        ctx.globalAlpha = p.life / 25;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      // Streak indicator
+      if (g.streak >= 2 && g.playerTurn) {
+        ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = g.onFire ? '#f97316' : '#fbbf24';
+        ctx.fillText(g.onFire ? `ON FIRE! ${g.streak} in a row` : `${g.streak} Hit Streak`, 15, H * 0.5);
+      }
+
       // Power meter (clean Wii-style)
-      if (g.phase === 'aiming') {
+      if (g.phase === 'aiming' || g.phase === 'release') {
         const pmX = 24, pmY = H * 0.2, pmH = 180, pmW = 14;
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
         ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 14, pmW + 6, pmH + 24, 8); ctx.fill();
@@ -821,6 +1078,26 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
         ctx.lineTo(pmX + pmW + 10, arrowY - 5);
         ctx.lineTo(pmX + pmW + 10, arrowY + 5);
         ctx.closePath(); ctx.fill();
+      }
+
+      // Release accuracy meter
+      if (g.phase === 'release') {
+        const rmX = 50, rmY = H * 0.2, rmH = 180, rmW = 14;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath(); ctx.roundRect(rmX - 3, rmY - 14, rmW + 6, rmH + 24, 8); ctx.fill();
+        ctx.fillStyle = '#e5e5e5'; ctx.fillRect(rmX, rmY, rmW, rmH);
+        ctx.fillStyle = 'rgba(34,197,94,0.3)';
+        ctx.fillRect(rmX, rmY + rmH * 0.4, rmW, rmH * 0.2);
+        const relFill = (g.releaseAccuracy / 100) * rmH;
+        ctx.fillStyle = Math.abs(g.releaseAccuracy - 50) < 15 ? '#22c55e' : '#eab308';
+        ctx.fillRect(rmX, rmY + rmH - relFill, rmW, relFill);
+        ctx.fillStyle = '#333';
+        const relY = rmY + rmH - relFill;
+        ctx.beginPath();
+        ctx.moveTo(rmX + rmW + 3, relY); ctx.lineTo(rmX + rmW + 10, relY - 5); ctx.lineTo(rmX + rmW + 10, relY + 5);
+        ctx.closePath(); ctx.fill();
+        ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#555';
+        ctx.fillText('RELEASE', rmX + rmW / 2, rmY - 4);
       }
 
       // ── SCOREBOARD (Wii-clean) ──
@@ -885,6 +1162,10 @@ interface BoxerState {
   hitAnim: number; dodgeDir: number; dodgeTimer: number;
   down: boolean; downTimer: number; getUpMashes: number;
   headBob: number; swayOffset: number;
+  // New
+  counterWindow: number; // frames where counter is available after blocking
+  damage: number; // accumulated damage for visual redness (0-100)
+  lastBlockTime: number;
 }
 
 function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
@@ -903,6 +1184,8 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     comboCount: number; comboTimer: number;
     cpuPattern: number; cpuPatternTimer: number;
     introTimer: number;
+    particles: { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number }[];
+    cornerRest: boolean; cornerTimer: number;
   } | null>(null);
   const animRef = useRef<number>(0);
   const [, forceUpdate] = useState(0);
@@ -916,7 +1199,8 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
   function makeBoxer(x: number): BoxerState {
     return { x, y: H * 0.55, hp: 100, stamina: 100, blocking: false, stunTimer: 0,
       knockdownCount: 0, punchAnim: null, hitAnim: 0, dodgeDir: 0, dodgeTimer: 0,
-      down: false, downTimer: 0, getUpMashes: 0, headBob: 0, swayOffset: 0 };
+      down: false, downTimer: 0, getUpMashes: 0, headBob: 0, swayOffset: 0,
+      counterWindow: 0, damage: 0, lastBlockTime: 0 };
   }
 
   function initState() {
@@ -932,6 +1216,8 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       comboCount: 0, comboTimer: 0,
       cpuPattern: 0, cpuPatternTimer: 0,
       introTimer: 90,
+      particles: [],
+      cornerRest: false, cornerTimer: 0,
     };
   }
 
@@ -966,10 +1252,13 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       const blockDmg = Math.floor((damages[type] || 5) * 0.15);
       defender.hp = Math.max(0, defender.hp - blockDmg);
       defender.stamina = Math.max(0, defender.stamina - 4);
+      defender.counterWindow = 20; // counter-punch window after block
+      defender.lastBlockTime = Date.now();
       s.message = 'BLOCKED!';
       s.messageTimer = 30;
       attacker.stunTimer = 6;
       s.shakeTimer = 4; s.shakeIntensity = 2;
+      s.particles.push({ x: (attacker.x + defender.x) / 2, y: defender.y - 10, vx: 0, vy: -2, life: 15, color: '#60a5fa', size: 8 });
       return true;
     }
 
@@ -977,6 +1266,14 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     const baseDmg = damages[type] || 5;
     const variance = Math.floor(Math.random() * 4) - 1;
     let dmg = baseDmg + variance;
+
+    // Counter-punch bonus (hitting within counter window after blocking)
+    if (attacker.counterWindow > 0) {
+      dmg = Math.floor(dmg * 1.6);
+      attacker.counterWindow = 0;
+      s.message = 'COUNTER!';
+      s.messageTimer = 35;
+    }
 
     // Combo bonus
     if (s.comboTimer > 0 && attacker === s.player) {
@@ -988,8 +1285,22 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     if (attacker === s.player) s.comboTimer = 45;
 
     defender.hp = Math.max(0, defender.hp - dmg);
+    defender.damage = Math.min(100, defender.damage + dmg * 0.8);
     defender.hitAnim = 12;
     defender.stunTimer = stuns[type] || 8;
+
+    // Impact particles
+    const impactX = (attacker.x + defender.x) / 2;
+    const impactY = type === 'body' ? defender.y + 5 : type === 'uppercut' ? defender.y - 25 : defender.y - 10;
+    for (let i = 0; i < 5 + dmg; i++) {
+      s.particles.push({
+        x: impactX, y: impactY,
+        vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6 - 2,
+        life: 12 + Math.random() * 10,
+        color: dmg > 15 ? '#ef4444' : '#fbbf24',
+        size: 2 + Math.random() * 3,
+      });
+    }
     s.shakeTimer = type === 'uppercut' ? 10 : type === 'hook' ? 7 : 4;
     s.shakeIntensity = type === 'uppercut' ? 6 : type === 'hook' ? 4 : 2;
 
@@ -1182,7 +1493,13 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.translate(-bx, -by);
       }
 
-      const skinColor = isPlayer ? '#f4c089' : '#8b6f47';
+      // Damage redness on skin
+      const dmgPct = boxer.damage / 100;
+      const baseSkin = isPlayer ? [244, 192, 137] : [139, 111, 71];
+      const r = Math.min(255, Math.floor(baseSkin[0] + dmgPct * 60));
+      const g = Math.max(0, Math.floor(baseSkin[1] - dmgPct * 40));
+      const b = Math.max(0, Math.floor(baseSkin[2] - dmgPct * 30));
+      const skinColor = `rgb(${r},${g},${b})`;
       const gloveColor = isPlayer ? '#ef4444' : '#3b82f6';
       const shortsColor = isPlayer ? '#22c55e' : '#a855f7';
       const headSize = 22;
@@ -1641,10 +1958,23 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         return;
       }
 
-      // Round end
+      // Round end - corner rest
       if (s.roundPhase === 'roundEnd') {
         s.countdownTimer--;
+        // Corner rest: heal a bit between rounds
+        if (s.countdownTimer === 60) {
+          s.cornerRest = true;
+          s.player.hp = Math.min(100, s.player.hp + 8);
+          s.cpu.hp = Math.min(100, s.cpu.hp + 5);
+          s.player.stamina = Math.min(100, s.player.stamina + 30);
+          s.cpu.stamina = Math.min(100, s.cpu.stamina + 25);
+          s.player.damage = Math.max(0, s.player.damage - 10);
+          s.cpu.damage = Math.max(0, s.cpu.damage - 10);
+          s.message = 'Corner rest...';
+          s.messageTimer = 50;
+        }
         if (s.countdownTimer <= 0) {
+          s.cornerRest = false;
           // Score round
           const pDmgDealt = 100 - s.cpu.hp;
           const cDmgDealt = 100 - s.player.hp;
@@ -1695,6 +2025,13 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         s.messageTimer = 60;
         return;
       }
+
+      // Particles update
+      s.particles = s.particles.filter(pt => { pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.1; pt.life--; return pt.life > 0; });
+
+      // Counter window decay
+      if (p.counterWindow > 0) p.counterWindow--;
+      if (cpu.counterWindow > 0) cpu.counterWindow--;
 
       // Stamina regen
       p.stamina = Math.min(100, p.stamina + 0.12);
@@ -1773,6 +2110,41 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       // Draw CPU behind player (perspective)
       drawBoxer(ctx2, s.cpu, false, s);
       drawBoxer(ctx2, s.player, true, s);
+
+      // Draw particles
+      for (const pt of s.particles) {
+        ctx2.globalAlpha = pt.life / 20;
+        ctx2.fillStyle = pt.color;
+        ctx2.beginPath(); ctx2.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2); ctx2.fill();
+      }
+      ctx2.globalAlpha = 1;
+
+      // Counter window indicator
+      if (s.player.counterWindow > 0) {
+        const flash = 0.5 + 0.5 * Math.sin(Date.now() / 50);
+        ctx2.fillStyle = `rgba(255,200,0,${flash * 0.3})`;
+        ctx2.beginPath();
+        ctx2.arc(s.player.x, s.player.y - 40, 35, 0, Math.PI * 2);
+        ctx2.fill();
+        ctx2.font = 'bold 10px sans-serif';
+        ctx2.fillStyle = '#fbbf24';
+        ctx2.textAlign = 'center';
+        ctx2.fillText('COUNTER!', s.player.x, s.player.y - 55);
+      }
+
+      // Corner rest visual
+      if (s.cornerRest) {
+        ctx2.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx2.fillRect(0, 0, W, H);
+        ctx2.font = 'bold 20px sans-serif';
+        ctx2.fillStyle = '#fff';
+        ctx2.textAlign = 'center';
+        ctx2.fillText('Corner Rest', W / 2, H * 0.45);
+        ctx2.font = '13px sans-serif';
+        ctx2.fillStyle = '#22c55e';
+        ctx2.fillText('Recovering HP & Stamina...', W / 2, H * 0.52);
+      }
+
       drawHUD(ctx2, s);
 
       ctx2.restore();
@@ -1924,6 +2296,13 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     introTimer: number;
     serveTimer: number;
     pointDelay: number;
+    // New
+    playerStamina: number; cpuStamina: number;
+    servePower: number; servePowerDir: number; servePowerPhase: boolean;
+    spinType: 'flat' | 'topspin' | 'slice';
+    umpireCall: string; umpireTimer: number;
+    ballMarks: { x: number; y: number; life: number }[];
+    particles: { x: number; y: number; vx: number; vy: number; life: number; color: string }[];
   } | null>(null);
 
   function pointName(pts: number): string {
@@ -1953,6 +2332,13 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       mouseX: W / 2, mouseY: COURT_BOTTOM - 30, keys: new Set(),
       matchOver: false, winner: '',
       introTimer: 120, serveTimer: 60, pointDelay: 0,
+      // New
+      playerStamina: 100, cpuStamina: 100,
+      servePower: 0, servePowerDir: 1, servePowerPhase: false,
+      spinType: 'flat' as 'flat' | 'topspin' | 'slice',
+      umpireCall: '', umpireTimer: 0,
+      ballMarks: [] as { x: number; y: number; life: number }[],
+      particles: [] as { x: number; y: number; vx: number; vy: number; life: number; color: string }[],
     };
   }
 
@@ -2046,17 +2432,30 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         s.playerSwingType = swingType;
         s.lastHitter = 'player';
 
+        // Stamina cost
+        s.playerStamina = Math.max(0, s.playerStamina - 3);
+        const staminaMult = 0.7 + (s.playerStamina / 100) * 0.3;
+
+        // Spin type affects ball
+        const spin = s.spinType;
+        const spinVXBonus = spin === 'slice' ? 1.5 : spin === 'topspin' ? -0.5 : 0;
+        const spinVZBonus = spin === 'topspin' ? -0.5 : spin === 'slice' ? 1 : 0;
+        const spinBall = spin === 'topspin' ? 0.6 : spin === 'slice' ? -0.4 : 0;
+
         // Aim toward CPU side
         const aimX = s.cpuX + (Math.random() - 0.5) * 200;
         const aimY = COURT_TOP + 20 + Math.random() * 60;
         const dx = aimX - s.ballX;
         const dy = aimY - s.ballY;
         const d = Math.sqrt(dx * dx + dy * dy);
-        const speed = 4 + Math.random() * 2;
-        s.ballVX = (dx / d) * speed * 0.7;
+        const speed = (4 + Math.random() * 2) * staminaMult;
+        s.ballVX = (dx / d) * speed * 0.7 + spinVXBonus;
         s.ballVY = (dy / d) * speed;
-        s.ballVZ = 2.5 + Math.random() * 1.5;
-        s.ballSpin = (Math.random() - 0.5) * 0.5;
+        s.ballVZ = 2.5 + Math.random() * 1.5 + spinVZBonus;
+        s.ballSpin = spinBall;
+
+        // Particle on hit
+        s.particles.push({ x: s.ballX, y: s.ballY, vx: 0, vy: -2, life: 10, color: '#ccff00' });
 
         // Lob if holding up
         if (s.keys.has('w') || s.keys.has('arrowup')) {
@@ -2092,6 +2491,8 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       s.messageTimer = 80;
       s.ballActive = false;
       s.pointDelay = 80;
+      s.umpireCall = msg;
+      s.umpireTimer = 60;
 
       if (to === 'player') s.playerPoints++;
       else s.cpuPoints++;
@@ -2171,6 +2572,24 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         doServe(s, 'cpu');
       }
 
+      // Stamina regen
+      s.playerStamina = Math.min(100, s.playerStamina + 0.03);
+      s.cpuStamina = Math.min(100, s.cpuStamina + 0.03);
+
+      // Spin type detection
+      if (s.keys.has('1')) s.spinType = 'flat';
+      else if (s.keys.has('2')) s.spinType = 'topspin';
+      else if (s.keys.has('3')) s.spinType = 'slice';
+
+      // Umpire timer
+      if (s.umpireTimer > 0) s.umpireTimer--;
+
+      // Ball marks
+      s.ballMarks = s.ballMarks.filter(m => { m.life--; return m.life > 0; });
+
+      // Particles
+      s.particles = s.particles.filter(p => { p.x += p.vx; p.y += p.vy; p.life--; return p.life > 0; });
+
       // Player movement (keyboard + mouse hybrid)
       const moveSpeed = 3.5;
       if (s.keys.has('a') || s.keys.has('arrowleft')) s.playerX -= moveSpeed;
@@ -2245,6 +2664,9 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
 
           if (!s.bounced) {
             s.bounced = true;
+            // Ball mark
+            s.ballMarks.push({ x: s.ballX, y: s.ballY, life: 180 });
+            s.particles.push({ x: s.ballX, y: s.ballY, vx: 0, vy: -1, life: 8, color: 'rgba(255,255,255,0.5)' });
             // Check if bounce is in court
             const inCourt = s.ballX >= COURT_LEFT && s.ballX <= COURT_RIGHT &&
               s.ballY >= COURT_TOP && s.ballY <= COURT_BOTTOM;
@@ -2546,6 +2968,39 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.globalAlpha = 1;
       }
 
+      // Stamina bar (player)
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(15, 60, 80, 8);
+      ctx.fillStyle = s.playerStamina > 30 ? '#22c55e' : '#ef4444';
+      ctx.fillRect(15, 60, 80 * (s.playerStamina / 100), 8);
+      ctx.fillStyle = '#fff';
+      ctx.font = '8px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('STA', 17, 67);
+
+      // Spin indicator
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = s.spinType === 'topspin' ? '#ef4444' : s.spinType === 'slice' ? '#3b82f6' : '#fff';
+      ctx.fillText(`Spin: ${s.spinType.toUpperCase()}`, 15, 80);
+      ctx.font = '8px sans-serif'; ctx.fillStyle = '#aaa';
+      ctx.fillText('1=Flat 2=Top 3=Slice', 15, 90);
+
+      // Ball marks on court
+      for (const m of s.ballMarks) {
+        ctx.globalAlpha = m.life / 180 * 0.4;
+        ctx.fillStyle = '#ccff00';
+        ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      // Particles
+      for (const p of s.particles) {
+        ctx.globalAlpha = p.life / 15;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
       // Rally counter
       if (s.rally > 2 && s.ballActive) {
         ctx.font = 'bold 12px sans-serif';
@@ -2656,7 +3111,10 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
           <button onPointerDown={() => doMove('right')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Move →</button>
         </div>
         <div className="flex gap-1.5 justify-center">
-          <button onPointerDown={() => { const s = stateRef.current; if (s) s.keys.add('w'); setTimeout(() => stateRef.current?.keys.delete('w'), 200); doSwing(); }} className="px-4 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Lob Shot</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.keys.add('w'); setTimeout(() => stateRef.current?.keys.delete('w'), 200); doSwing(); }} className="px-4 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Lob</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'flat'; }} className="px-3 py-2 bg-gray-400 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Flat</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'topspin'; }} className="px-3 py-2 bg-red-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Top</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'slice'; }} className="px-3 py-2 bg-blue-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Slice</button>
         </div>
       </div>
       <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
@@ -2753,6 +3211,11 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
     matchOver: boolean;
     introTimer: number;
     landingAnim: number;
+    // New
+    distToHole: number;
+    particles: { x: number; y: number; vx: number; vy: number; life: number; color: string }[];
+    puttingMode: boolean; // true when near hole
+    shotDistance: number; // how far last shot went
   } | null>(null);
 
   function getScoreName(strokes: number, par: number): string {
@@ -2816,6 +3279,10 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       ballTrail: [], lastBallX: hole.teeX, lastBallY: hole.teeY,
       terrain: 'tee', matchOver: false,
       introTimer: 60, landingAnim: 0,
+      distToHole: Math.sqrt((hole.holeX - hole.teeX) ** 2 + (hole.holeY - hole.teeY) ** 2),
+      particles: [],
+      puttingMode: false,
+      shotDistance: 0,
     };
   }
 
@@ -2909,12 +3376,23 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       s.message = '';
       s.landingAnim = 0;
 
-      // Bunker penalty
+      // Bunker penalty + sand splash
       if (s.terrain === 'bunker') {
         s.ballVX *= 0.6;
         s.ballVY *= 0.6;
         s.ballVZ *= 0.7;
+        for (let i = 0; i < 12; i++) {
+          s.particles.push({ x: s.ballX, y: s.ballY, vx: (Math.random() - 0.5) * 4, vy: -Math.random() * 3 - 1, life: 15 + Math.random() * 10, color: '#f4d794' });
+        }
       }
+
+      // Rough penalty
+      if (s.terrain === 'rough') {
+        s.ballVX *= 0.85;
+        s.ballVY *= 0.85;
+      }
+
+      s.shotDistance = 0;
     }
 
     window.addEventListener('keydown', handleKey);
@@ -2942,11 +3420,20 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
         if (s.swingAccuracy <= 0) { s.swingAccuracy = 0; s.accuracyDir = 2; }
       }
 
+      // Distance to hole
+      const hole = HOLES[s.holeIndex];
+      s.distToHole = Math.sqrt((s.ballX - hole.holeX) ** 2 + (s.ballY - hole.holeY) ** 2);
+      s.puttingMode = s.distToHole < 50 && !s.ballMoving;
+
+      // Particles update
+      s.particles = s.particles.filter(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life--; return p.life > 0; });
+
       // Ball physics
       if (s.ballMoving) {
-        // Wind
-        s.ballVX += Math.cos(s.windAngle) * s.windSpeed * 0.003;
-        s.ballVY += Math.sin(s.windAngle) * s.windSpeed * 0.003;
+        // Wind (reduced for putter)
+        const windMult = s.club === 3 ? 0.1 : 1;
+        s.ballVX += Math.cos(s.windAngle) * s.windSpeed * 0.003 * windMult;
+        s.ballVY += Math.sin(s.windAngle) * s.windSpeed * 0.003 * windMult;
 
         s.ballX += s.ballVX;
         s.ballY += s.ballVY;
@@ -3296,6 +3783,17 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       ctx.font = '10px sans-serif';
       ctx.fillText('W/S to change', W * 0.78, 30);
 
+      // Distance to hole
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(`${Math.round(s.distToHole)} yds`, W * 0.78, 30);
+      if (s.puttingMode) {
+        ctx.fillStyle = '#6ee7b7';
+        ctx.font = '9px sans-serif';
+        ctx.fillText('ON THE GREEN', W * 0.78, 38);
+      }
+
       // Terrain
       ctx.textAlign = 'right';
       ctx.fillStyle = s.terrain === 'bunker' ? '#f4d794' : s.terrain === 'rough' ? '#9ca3af' : '#4ade80';
@@ -3498,6 +3996,25 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       if (!c) return;
       drawHole(c, s);
       drawBall(c, s);
+
+      // Particles
+      for (const p of s.particles) {
+        c.globalAlpha = p.life / 20;
+        c.fillStyle = p.color;
+        c.beginPath(); c.arc(p.x, p.y, 2.5, 0, Math.PI * 2); c.fill();
+      }
+      c.globalAlpha = 1;
+
+      // Putting grid (green contour lines when putting)
+      if (s.puttingMode) {
+        const hole = HOLES[s.holeIndex];
+        c.strokeStyle = 'rgba(255,255,255,0.12)';
+        c.lineWidth = 0.5;
+        for (let r = 8; r < 40; r += 8) {
+          c.beginPath(); c.arc(hole.holeX, hole.holeY, r, 0, Math.PI * 2); c.stroke();
+        }
+      }
+
       drawHUD(c, s);
     }
 
