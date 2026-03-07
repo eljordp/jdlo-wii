@@ -513,10 +513,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, -0.5, 0.5); ctx.stroke();
         ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
-        // Pitch type label
-        ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillStyle = pi.color;
-        ctx.fillText(pi.name, W / 2, H * 0.35);
+        // (pitch type visual via trail color only - no label clutter)
       }
 
       // Foul ball flight
@@ -567,12 +564,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       }
       ctx.globalAlpha = 1;
 
-      // Streak indicator
-      if (g.streak >= 2 && g.batting) {
-        ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'right';
-        ctx.fillStyle = '#fbbf24';
-        ctx.fillText(`${g.streak} Hit Streak!`, W - 15, H - 32);
-      }
+      // (streak tracked internally for gameplay but not displayed)
 
       // ── SCOREBOARD HUD ──
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -650,7 +642,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
           className="px-8 py-3 bg-white text-red-600 font-bold rounded-xl hover:scale-105 active:scale-90 transition-transform shadow-lg text-sm"
         >SWING!</button>
       </div>
-      <p className="text-white/50 text-xs">{hud.batting ? 'Swing when the timing circle turns green!' : 'Watch the CPU bat...'}</p>
+      <p className="text-white/50 text-xs">{hud.batting ? 'Tap to swing!' : 'CPU at bat...'}</p>
       {hud.gameOver && (
         <div className="space-y-2 text-center">
           <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN!' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
@@ -825,7 +817,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
             syncHud('Click to DUNK!');
           } else if (g.playerTurn) {
             g.phase = 'aiming'; g.power = 0; g.powerDir = 1.4;
-            syncHud('Click for power, then accuracy!');
+            syncHud('Click to shoot!');
           } else {
             const acc = Math.random() < cpuMake ? Math.random() * threshold * 0.8 : threshold + Math.random() * 20;
             launchBall(acc, threshold * 0.3);
@@ -843,16 +835,9 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
             // Dunk!
             g.phase = 'dunk'; g.dunkPhase = 0;
           } else {
-            g.phase = 'release'; g.releaseAccuracy = 50; g.releaseDir = 2.5;
+            // Single-click: power determines shot quality
+            launchBall(Math.abs(g.power - 75), 0);
           }
-        }
-      } else if (g.phase === 'release') {
-        g.releaseAccuracy += g.releaseDir * 2;
-        if (g.releaseAccuracy >= 100) { g.releaseAccuracy = 100; g.releaseDir = -2.5; }
-        if (g.releaseAccuracy <= 0) { g.releaseAccuracy = 0; g.releaseDir = 2.5; }
-        if (g.clicked) {
-          g.clicked = false;
-          launchBall(Math.abs(g.power - 75), Math.abs(g.releaseAccuracy - 50));
         }
       } else if (g.phase === 'dunk') {
         g.dunkPhase += 0.03;
@@ -1046,12 +1031,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       }
       ctx.globalAlpha = 1;
 
-      // Streak indicator
-      if (g.streak >= 2 && g.playerTurn) {
-        ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
-        ctx.fillStyle = g.onFire ? '#f97316' : '#fbbf24';
-        ctx.fillText(g.onFire ? `ON FIRE! ${g.streak} in a row` : `${g.streak} Hit Streak`, 15, H * 0.5);
-      }
+      // (streak tracked via on-fire rim effect only - no text)
 
       // Power meter (clean Wii-style)
       if (g.phase === 'aiming' || g.phase === 'release') {
@@ -1080,25 +1060,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
         ctx.closePath(); ctx.fill();
       }
 
-      // Release accuracy meter
-      if (g.phase === 'release') {
-        const rmX = 50, rmY = H * 0.2, rmH = 180, rmW = 14;
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath(); ctx.roundRect(rmX - 3, rmY - 14, rmW + 6, rmH + 24, 8); ctx.fill();
-        ctx.fillStyle = '#e5e5e5'; ctx.fillRect(rmX, rmY, rmW, rmH);
-        ctx.fillStyle = 'rgba(34,197,94,0.3)';
-        ctx.fillRect(rmX, rmY + rmH * 0.4, rmW, rmH * 0.2);
-        const relFill = (g.releaseAccuracy / 100) * rmH;
-        ctx.fillStyle = Math.abs(g.releaseAccuracy - 50) < 15 ? '#22c55e' : '#eab308';
-        ctx.fillRect(rmX, rmY + rmH - relFill, rmW, relFill);
-        ctx.fillStyle = '#333';
-        const relY = rmY + rmH - relFill;
-        ctx.beginPath();
-        ctx.moveTo(rmX + rmW + 3, relY); ctx.lineTo(rmX + rmW + 10, relY - 5); ctx.lineTo(rmX + rmW + 10, relY + 5);
-        ctx.closePath(); ctx.fill();
-        ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#555';
-        ctx.fillText('RELEASE', rmX + rmW / 2, rmY - 4);
-      }
+      // (single-click shooting - no release meter)
 
       // ── SCOREBOARD (Wii-clean) ──
       ctx.fillStyle = 'rgba(255,255,255,0.88)';
@@ -1143,7 +1105,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
     <div className="flex flex-col items-center gap-3 p-4">
       <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
       <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
-      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Click when the power bar is green!' : 'CPU shooting...'}</p>
+      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Click to shoot!' : 'CPU shooting...'}</p>
       {hud.gameOver && (
         <div className="space-y-2 text-center">
           <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN! 🏆' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
@@ -1724,18 +1686,6 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       ctx.fillStyle = secs <= 10 ? '#ef4444' : '#fff';
       ctx.fillText(`${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`, W / 2, 42);
 
-      // Score
-      ctx.font = '11px sans-serif';
-      ctx.fillStyle = '#ccc';
-      ctx.fillText(`Score: ${s.playerScore} - ${s.cpuScore}`, W / 2, 56);
-
-      // Combo counter
-      if (s.comboCount >= 2 && s.comboTimer > 0) {
-        ctx.font = 'bold 18px sans-serif';
-        ctx.fillStyle = '#fbbf24';
-        ctx.fillText(`${s.comboCount}x COMBO!`, W / 2, H * 0.42);
-      }
-
       // Message
       if (s.messageTimer > 0) {
         const alpha = Math.min(1, s.messageTimer / 15);
@@ -2119,30 +2069,19 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       }
       ctx2.globalAlpha = 1;
 
-      // Counter window indicator
+      // Counter window indicator (subtle glow only)
       if (s.player.counterWindow > 0) {
         const flash = 0.5 + 0.5 * Math.sin(Date.now() / 50);
-        ctx2.fillStyle = `rgba(255,200,0,${flash * 0.3})`;
+        ctx2.fillStyle = `rgba(255,200,0,${flash * 0.2})`;
         ctx2.beginPath();
-        ctx2.arc(s.player.x, s.player.y - 40, 35, 0, Math.PI * 2);
+        ctx2.arc(s.player.x, s.player.y - 10, 30, 0, Math.PI * 2);
         ctx2.fill();
-        ctx2.font = 'bold 10px sans-serif';
-        ctx2.fillStyle = '#fbbf24';
-        ctx2.textAlign = 'center';
-        ctx2.fillText('COUNTER!', s.player.x, s.player.y - 55);
       }
 
-      // Corner rest visual
+      // Corner rest visual (subtle dim only)
       if (s.cornerRest) {
-        ctx2.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx2.fillStyle = 'rgba(0,0,0,0.2)';
         ctx2.fillRect(0, 0, W, H);
-        ctx2.font = 'bold 20px sans-serif';
-        ctx2.fillStyle = '#fff';
-        ctx2.textAlign = 'center';
-        ctx2.fillText('Corner Rest', W / 2, H * 0.45);
-        ctx2.font = '13px sans-serif';
-        ctx2.fillStyle = '#22c55e';
-        ctx2.fillText('Recovering HP & Stamina...', W / 2, H * 0.52);
       }
 
       drawHUD(ctx2, s);
@@ -2222,37 +2161,24 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         onFocus={() => {}}
       />
 
-      {/* Mobile Controls */}
+      {/* Mobile Controls - Clean layout */}
       <div className="w-full max-w-[600px] space-y-1.5">
-        {/* Punches */}
-        <div className="flex gap-1.5 justify-center flex-wrap">
-          <button onPointerDown={() => doAttack('jab', 'L')} className="px-3 py-2 bg-red-500 text-white font-bold rounded-lg hover:bg-red-600 active:scale-90 transition-all text-xs shadow-lg">L Jab</button>
-          <button onPointerDown={() => doAttack('jab', 'R')} className="px-3 py-2 bg-red-500 text-white font-bold rounded-lg hover:bg-red-600 active:scale-90 transition-all text-xs shadow-lg">R Jab</button>
-          <button onPointerDown={() => doAttack('hook', 'L')} className="px-3 py-2 bg-red-700 text-white font-bold rounded-lg hover:bg-red-800 active:scale-90 transition-all text-xs shadow-lg">Hook</button>
-          <button onPointerDown={() => doAttack('uppercut', 'R')} className="px-3 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 active:scale-90 transition-all text-xs shadow-lg">Upper</button>
-          <button onPointerDown={() => doAttack('body', 'L')} className="px-3 py-2 bg-red-400 text-white font-bold rounded-lg hover:bg-red-500 active:scale-90 transition-all text-xs shadow-lg">Body</button>
-        </div>
-
-        {/* Movement & Defense */}
-        <div className="flex gap-1.5 justify-center flex-wrap">
-          <button onPointerDown={() => doDodge(-1)} className="px-3 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Dodge L</button>
-          <button onPointerDown={() => doMove(-1)} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">← Move</button>
+        <div className="flex gap-1.5 justify-center">
+          <button onPointerDown={() => doAttack('jab', Math.random() < 0.5 ? 'L' : 'R')} className="px-4 py-2.5 bg-red-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Jab</button>
+          <button onPointerDown={() => doAttack('hook', 'L')} className="px-4 py-2.5 bg-red-700 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Hook</button>
+          <button onPointerDown={() => doAttack('uppercut', 'R')} className="px-4 py-2.5 bg-orange-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Upper</button>
           <button
             onPointerDown={() => doBlock(true)}
             onPointerUp={() => doBlock(false)}
             onPointerLeave={() => doBlock(false)}
-            className="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg active:bg-blue-700 transition-all text-xs shadow-lg"
-          >Block (Hold)</button>
-          <button onPointerDown={() => doMove(1)} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Move →</button>
-          <button onPointerDown={() => doDodge(1)} className="px-3 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Dodge R</button>
+            className="px-4 py-2.5 bg-blue-500 text-white font-bold rounded-lg active:bg-blue-700 transition-all text-xs shadow-lg"
+          >Block</button>
         </div>
-
-        {/* Get Up button (shown during knockdown) */}
-        <div className="flex justify-center">
-          <button
-            onPointerDown={mashGetUp}
-            className="px-6 py-2 bg-yellow-500 text-black font-bold rounded-lg active:scale-90 transition-all text-sm shadow-lg animate-pulse"
-          >MASH TO GET UP!</button>
+        <div className="flex gap-1.5 justify-center">
+          <button onPointerDown={() => { doMove(-1); doDodge(-1); }} className="px-4 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">← Dodge</button>
+          <button onPointerDown={() => doAttack('body', 'L')} className="px-4 py-2 bg-red-400 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Body</button>
+          <button onPointerDown={mashGetUp} className="px-4 py-2 bg-yellow-500 text-black font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Get Up!</button>
+          <button onPointerDown={() => { doMove(1); doDodge(1); }} className="px-4 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Dodge →</button>
         </div>
       </div>
 
@@ -2968,46 +2894,13 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.globalAlpha = 1;
       }
 
-      // Stamina bar (player)
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(15, 60, 80, 8);
-      ctx.fillStyle = s.playerStamina > 30 ? '#22c55e' : '#ef4444';
-      ctx.fillRect(15, 60, 80 * (s.playerStamina / 100), 8);
-      ctx.fillStyle = '#fff';
-      ctx.font = '8px sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText('STA', 17, 67);
-
-      // Spin indicator
-      ctx.textAlign = 'left';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillStyle = s.spinType === 'topspin' ? '#ef4444' : s.spinType === 'slice' ? '#3b82f6' : '#fff';
-      ctx.fillText(`Spin: ${s.spinType.toUpperCase()}`, 15, 80);
-      ctx.font = '8px sans-serif'; ctx.fillStyle = '#aaa';
-      ctx.fillText('1=Flat 2=Top 3=Slice', 15, 90);
-
-      // Ball marks on court
-      for (const m of s.ballMarks) {
-        ctx.globalAlpha = m.life / 180 * 0.4;
-        ctx.fillStyle = '#ccff00';
-        ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-
-      // Particles
+      // Particles (hit feedback only)
       for (const p of s.particles) {
         ctx.globalAlpha = p.life / 15;
         ctx.fillStyle = p.color;
         ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
-
-      // Rally counter
-      if (s.rally > 2 && s.ballActive) {
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillStyle = '#fbbf24';
-        ctx.textAlign = 'right';
-        ctx.fillText(`Rally: ${s.rally}`, W - 15, H - 10);
-      }
 
       // Match over overlay
       if (s.matchOver) {
@@ -3025,22 +2918,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.fillText('Click to continue', W / 2, H * 0.62);
       }
 
-      // Intro
-      if (s.introTimer > 0) {
-        const alpha = Math.min(1, s.introTimer / 30);
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(W * 0.1, H * 0.72, W * 0.8, H * 0.22);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('CONTROLS', W / 2, H * 0.78);
-        ctx.font = '11px sans-serif';
-        ctx.fillText('A/D or Mouse = Move | W/S = Forward/Back', W / 2, H * 0.84);
-        ctx.fillText('SPACE or J/K = Swing | Click = Serve & Swing', W / 2, H * 0.89);
-        ctx.fillText('W while swinging = Lob shot', W / 2, H * 0.94);
-        ctx.globalAlpha = 1;
-      }
+      // (controls shown via mobile buttons - no overlay)
     }
 
     function render() {
@@ -3111,10 +2989,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
           <button onPointerDown={() => doMove('right')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Move →</button>
         </div>
         <div className="flex gap-1.5 justify-center">
-          <button onPointerDown={() => { const s = stateRef.current; if (s) s.keys.add('w'); setTimeout(() => stateRef.current?.keys.delete('w'), 200); doSwing(); }} className="px-4 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Lob</button>
-          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'flat'; }} className="px-3 py-2 bg-gray-400 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Flat</button>
-          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'topspin'; }} className="px-3 py-2 bg-red-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Top</button>
-          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'slice'; }} className="px-3 py-2 bg-blue-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Slice</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.keys.add('w'); setTimeout(() => stateRef.current?.keys.delete('w'), 200); doSwing(); }} className="px-5 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Lob</button>
         </div>
       </div>
       <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
@@ -3536,8 +3411,7 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
             // Re-aim toward hole
             s.aimAngle = Math.atan2(hole.holeY - s.ballY, hole.holeX - s.ballX);
 
-            if (s.terrain === 'bunker') { s.message = 'In a bunker'; s.messageTimer = 40; }
-            else if (s.terrain === 'rough') { s.message = 'In the rough'; s.messageTimer = 40; }
+            // terrain visuals on the course speak for themselves
           }
         }
       }
@@ -3774,38 +3648,14 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       ctx.font = '9px sans-serif';
       ctx.fillText(`${s.windSpeed.toFixed(1)} mph`, W * 0.55, 38);
 
-      // Club
-      ctx.textAlign = 'center';
+      // Club + Distance
+      ctx.textAlign = 'right';
       ctx.fillStyle = '#fbbf24';
       ctx.font = 'bold 13px sans-serif';
-      ctx.fillText(CLUBS[s.club].name, W * 0.78, 16);
-      ctx.fillStyle = '#aaa';
-      ctx.font = '10px sans-serif';
-      ctx.fillText('W/S to change', W * 0.78, 30);
-
-      // Distance to hole
-      ctx.textAlign = 'center';
+      ctx.fillText(CLUBS[s.club].name, W - 12, 16);
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(`${Math.round(s.distToHole)} yds`, W * 0.78, 30);
-      if (s.puttingMode) {
-        ctx.fillStyle = '#6ee7b7';
-        ctx.font = '9px sans-serif';
-        ctx.fillText('ON THE GREEN', W * 0.78, 38);
-      }
-
-      // Terrain
-      ctx.textAlign = 'right';
-      ctx.fillStyle = s.terrain === 'bunker' ? '#f4d794' : s.terrain === 'rough' ? '#9ca3af' : '#4ade80';
-      ctx.font = '11px sans-serif';
-      ctx.fillText(s.terrain.toUpperCase(), W - 10, 16);
-
-      // Total score
-      const totalOver = s.scorecard.reduce((sum, sc, i) => sum + (sc - HOLES[i].par), 0);
-      ctx.fillStyle = '#fff';
-      ctx.font = '11px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(`Total: ${totalOver >= 0 ? '+' : ''}${totalOver}`, W - 10, 32);
+      ctx.fillText(`${Math.round(s.distToHole)} yds`, W - 12, 32);
 
       // Power meter
       if (s.powerPhase === 'charging' || s.powerPhase === 'swinging') {
@@ -3880,29 +3730,7 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
         ctx.fillText('ACCURACY', meterX - 5, meterY - 10);
       }
 
-      // Phase instructions
-      if (s.powerPhase === 'aim') {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W * 0.2, H - 30, W * 0.6, 25);
-        ctx.fillStyle = '#fbbf24';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('A/D = Aim | W/S = Club | SPACE/Click = Start Swing', W / 2, H - 13);
-      } else if (s.powerPhase === 'charging') {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W * 0.3, H - 30, W * 0.4, 25);
-        ctx.fillStyle = '#ef4444';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('SPACE/Click to set POWER!', W / 2, H - 13);
-      } else if (s.powerPhase === 'swinging') {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W * 0.3, H - 30, W * 0.4, 25);
-        ctx.fillStyle = '#3b82f6';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('SPACE/Click for ACCURACY!', W / 2, H - 13);
-      }
+      // (controls shown via mobile buttons - no instruction overlay)
 
       // Message
       if (s.messageTimer > 0) {
@@ -4005,15 +3833,7 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       }
       c.globalAlpha = 1;
 
-      // Putting grid (green contour lines when putting)
-      if (s.puttingMode) {
-        const hole = HOLES[s.holeIndex];
-        c.strokeStyle = 'rgba(255,255,255,0.12)';
-        c.lineWidth = 0.5;
-        for (let r = 8; r < 40; r += 8) {
-          c.beginPath(); c.arc(hole.holeX, hole.holeY, r, 0, Math.PI * 2); c.stroke();
-        }
-      }
+      // (green is already visible via color - no contour lines needed)
 
       drawHUD(c, s);
     }
