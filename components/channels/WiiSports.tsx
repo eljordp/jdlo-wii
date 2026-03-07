@@ -4119,12 +4119,72 @@ function PacManGame({ onExit }: { onExit: () => void }) {
   );
 }
 
+// ═══════ GAME INSTRUCTIONS ═══════
+const GAME_INSTRUCTIONS: Record<string, { title: string; emoji: string; lines: string[] }> = {
+  baseball: {
+    title: 'Baseball',
+    emoji: '⚾',
+    lines: [
+      'Tap / Click to swing the bat',
+      'Time your swing when the ball is close',
+      'Green timing circle = perfect swing',
+      'CPU bats after you — play defense!',
+    ],
+  },
+  basketball: {
+    title: 'Basketball',
+    emoji: '🏀',
+    lines: [
+      'Click to start the power meter',
+      'Click again when the bar is in the green zone',
+      'Take turns shooting with the CPU',
+      'Score the most points before time runs out',
+    ],
+  },
+  boxing: {
+    title: 'Boxing',
+    emoji: '🥊',
+    lines: [
+      'Jab, Hook, Uppercut, Body — punch to deal damage',
+      'Hold Block to reduce incoming damage',
+      'Dodge left/right to avoid punches',
+      'Mash buttons to get up from knockdowns!',
+      '',
+      'Keyboard: J/K = Jab | H = Hook | U = Upper | B = Body',
+      'SPACE = Block | Q/E = Dodge | A/D = Move',
+    ],
+  },
+  tennis: {
+    title: 'Tennis',
+    emoji: '🎾',
+    lines: [
+      'Move with mouse or A/D/W/S keys',
+      'Click to serve and swing',
+      'Ball auto-hits when you are close enough',
+      'Press W while swinging for a lob shot',
+      'Real tennis scoring: 15-30-40, games, sets',
+    ],
+  },
+  golf: {
+    title: 'Golf',
+    emoji: '⛳',
+    lines: [
+      'Click once to start the power meter',
+      'Click again to set power (green = good)',
+      'Click a third time to set accuracy (center = straight)',
+      'A/D = Aim direction | W/S = Change club',
+      'Club auto-selects based on distance to hole',
+    ],
+  },
+};
+
 // ═══════ MAIN WII SPORTS COMPONENT ═══════
 export default function WiiSports({ onBack }: Props) {
   const [sport, setSport] = useState<Sport>('menu');
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [arcadeGame, setArcadeGame] = useState<ArcadeGame | null>(null);
   const [pendingSport, setPendingSport] = useState<Sport | null>(null);
+  const [showInstructions, setShowInstructions] = useState<string | null>(null);
 
   const selectSport = (s: Sport) => {
     if (s === 'arcade') { setSport('arcade'); return; }
@@ -4133,11 +4193,53 @@ export default function WiiSports({ onBack }: Props) {
 
   const startGame = (diff: Difficulty) => {
     setDifficulty(diff);
-    if (pendingSport) setSport(pendingSport);
-    setPendingSport(null);
+    if (pendingSport) {
+      setShowInstructions(pendingSport);
+    }
   };
 
-  const exitGame = () => { setSport('menu'); setDifficulty(null); setArcadeGame(null); setPendingSport(null); };
+  const dismissInstructions = () => {
+    if (pendingSport) setSport(pendingSport);
+    setPendingSport(null);
+    setShowInstructions(null);
+  };
+
+  const exitGame = () => { setSport('menu'); setDifficulty(null); setArcadeGame(null); setPendingSport(null); setShowInstructions(null); };
+
+  // Instructions screen (shown after difficulty, before game starts)
+  if (showInstructions && GAME_INSTRUCTIONS[showInstructions]) {
+    const info = GAME_INSTRUCTIONS[showInstructions];
+    const sportColor = sports.find(s => s.id === showInstructions)?.color || 'from-blue-500 to-blue-600';
+    return (
+      <div className="h-full w-full overflow-auto" style={{ background: 'linear-gradient(135deg, #1a1a2e, #16213e)' }}>
+        <div className="sticky top-0 z-10 backdrop-blur-md" style={{ background: 'rgba(26,26,46,0.9)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <div className="flex items-center gap-3 p-4">
+            <button onClick={() => { setShowInstructions(null); setPendingSport(null); setDifficulty(null); }} className="flex items-center gap-1.5 text-white bg-white/10 hover:bg-white/20 rounded-full px-4 py-2 text-sm font-bold transition-colors">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <h1 className="text-white font-bold text-lg">How to Play</h1>
+          </div>
+        </div>
+        <div className="flex flex-col items-center gap-6 p-6 pt-10 max-w-md mx-auto">
+          <div className="text-6xl">{info.emoji}</div>
+          <h2 className="text-white font-bold text-2xl">{info.title}</h2>
+          <div className="w-full bg-white/10 rounded-2xl p-5 space-y-3">
+            {info.lines.map((line, i) => (
+              line === '' ? <div key={i} className="border-t border-white/10" /> :
+              <div key={i} className="flex gap-3 items-start">
+                <span className="text-white/40 font-bold text-sm mt-0.5">{line.includes('=') || line.includes('|') ? '⌨' : '•'}</span>
+                <p className="text-white/80 text-sm leading-relaxed">{line}</p>
+              </div>
+            ))}
+          </div>
+          <button onClick={dismissInstructions}
+            className={`w-full max-w-xs px-8 py-4 bg-gradient-to-br ${sportColor} rounded-2xl font-bold text-white text-lg hover:scale-105 active:scale-95 transition-transform shadow-lg`}>
+            Play!
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Difficulty selection
   if (pendingSport) {
