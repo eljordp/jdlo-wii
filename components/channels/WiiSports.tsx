@@ -49,9 +49,9 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
   const [hud, setHud] = useState({ player: 0, cpu: 0, inning: 1, outs: 0, strikes: 0, balls: 0, batting: true, gameOver: false, message: 'Tap to swing!' });
 
   const maxInnings = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 5 : 9;
-  const sweetSpot = difficulty === 'easy' ? 0.18 : difficulty === 'medium' ? 0.12 : 0.08;
-  const pitchSpd = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.016 : 0.022;
-  const cpuContact = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.5 : 0.65;
+  const sweetSpot = difficulty === 'easy' ? 0.18 : difficulty === 'medium' ? 0.12 : 0.04;
+  const pitchSpd = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.016 : 0.032;
+  const cpuContact = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.5 : 0.85;
 
   const gRef = useRef({
     phase: 'idle' as 'idle' | 'pitch' | 'hit_fly' | 'result' | 'foul_fly',
@@ -98,7 +98,8 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       g.pitchCurveOffset = 0;
       // Pick pitch type based on difficulty
       const pitchTypes: PitchType[] = ['fastball', 'curve', 'changeup'];
-      g.pitchType = difficulty === 'easy' ? 'fastball' : pitchTypes[Math.floor(Math.random() * pitchTypes.length)];
+      const hardPitches: PitchType[] = ['curve', 'changeup', 'curve', 'changeup', 'fastball'];
+      g.pitchType = difficulty === 'easy' ? 'fastball' : difficulty === 'hard' ? hardPitches[Math.floor(Math.random() * hardPitches.length)] : pitchTypes[Math.floor(Math.random() * pitchTypes.length)];
     };
 
     const spawnParticles = (x: number, y: number, count: number, color: string) => {
@@ -672,9 +673,9 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState({ player: 0, cpu: 0, time: 45, playerTurn: true, gameOver: false, message: 'Click to shoot!' });
 
-  const threshold = difficulty === 'easy' ? 28 : difficulty === 'medium' ? 18 : 10;
-  const cpuMake = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.5 : 0.7;
-  const gameTime = difficulty === 'easy' ? 50 : difficulty === 'medium' ? 40 : 30;
+  const threshold = difficulty === 'easy' ? 28 : difficulty === 'medium' ? 18 : 5;
+  const cpuMake = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.5 : 0.88;
+  const gameTime = difficulty === 'easy' ? 50 : difficulty === 'medium' ? 40 : 24;
 
   const gRef = useRef({
     phase: 'idle' as 'idle' | 'aiming' | 'release' | 'flying' | 'result' | 'moving' | 'dunk',
@@ -825,7 +826,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
         }
         if (g.playerTurn && g.clicked && g.timer > 0) { g.clicked = false; g.timer = 0; }
       } else if (g.phase === 'aiming') {
-        g.power += g.powerDir * 1.4;
+        g.power += g.powerDir * (difficulty === 'hard' ? 2.8 : 1.4);
         if (g.power >= 100) { g.power = 100; g.powerDir = -1; }
         if (g.power <= 0) { g.power = 0; g.powerDir = 1; }
         if (g.clicked) {
@@ -1153,10 +1154,10 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
   const [, forceUpdate] = useState(0);
 
   const W = 600, H = 440;
-  const cpuAggression = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.025 : 0.04;
-  const cpuReaction = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.5 : 0.75;
-  const cpuBlockChance = difficulty === 'easy' ? 0.15 : difficulty === 'medium' ? 0.3 : 0.5;
-  const cpuDodgeChance = difficulty === 'easy' ? 0.05 : difficulty === 'medium' ? 0.12 : 0.22;
+  const cpuAggression = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.025 : 0.065;
+  const cpuReaction = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.5 : 0.92;
+  const cpuBlockChance = difficulty === 'easy' ? 0.15 : difficulty === 'medium' ? 0.3 : 0.7;
+  const cpuDodgeChance = difficulty === 'easy' ? 0.05 : difficulty === 'medium' ? 0.12 : 0.38;
 
   function makeBoxer(x: number): BoxerState {
     return { x, y: H * 0.55, hp: 100, stamina: 100, blocking: false, stunTimer: 0,
@@ -1228,6 +1229,8 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     const baseDmg = damages[type] || 5;
     const variance = Math.floor(Math.random() * 4) - 1;
     let dmg = baseDmg + variance;
+    // CPU hits harder on hard
+    if (attacker !== s.player && difficulty === 'hard') dmg = Math.floor(dmg * 1.5);
 
     // Counter-punch bonus (hitting within counter window after blocking)
     if (attacker.counterWindow > 0) {
@@ -2196,7 +2199,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
   const W = 600, H = 420;
   const COURT_LEFT = 60, COURT_RIGHT = W - 60, COURT_TOP = 70, COURT_BOTTOM = H - 50;
   const NET_Y = (COURT_TOP + COURT_BOTTOM) / 2;
-  const cpuSkill = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.6 : 0.85;
+  const cpuSkill = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.6 : 0.97;
 
   const stateRef = useRef<{
     // Players
@@ -3014,6 +3017,8 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
 
   const W = 600, H = 440;
   const maxHoles = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 6 : 9;
+  const windMult = difficulty === 'easy' ? 1 : difficulty === 'medium' ? 1 : 2.2;
+  const meterSpeed = difficulty === 'easy' ? 1 : difficulty === 'medium' ? 1 : 2;
 
   const HOLES: GolfHole[] = [
     { name: 'The Opener', par: 3, teeX: 100, teeY: 380, holeX: 450, holeY: 100,
@@ -3149,7 +3154,7 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       club: 0, aimAngle: Math.atan2(hole.holeY - hole.teeY, hole.holeX - hole.teeX),
       powerPhase: 'intro', powerLevel: 0, powerDir: 1,
       swingAccuracy: 50, accuracyDir: 1,
-      windSpeed: 0.5 + Math.random() * 2.5, windAngle: Math.random() * Math.PI * 2,
+      windSpeed: (0.5 + Math.random() * 2.5) * windMult, windAngle: Math.random() * Math.PI * 2,
       message: hole.name, messageTimer: 90,
       ballTrail: [], lastBallX: hole.teeX, lastBallY: hole.teeY,
       terrain: 'tee', matchOver: false,
@@ -3283,14 +3288,14 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
 
       // Power meter oscillation
       if (s.powerPhase === 'charging') {
-        s.powerLevel += s.powerDir * 1.5;
+        s.powerLevel += s.powerDir * 1.5 * meterSpeed;
         if (s.powerLevel >= 100) { s.powerLevel = 100; s.powerDir = -1; }
         if (s.powerLevel <= 0) { s.powerLevel = 0; s.powerDir = 1; }
       }
 
       // Accuracy meter oscillation
       if (s.powerPhase === 'swinging') {
-        s.swingAccuracy += s.accuracyDir * 2;
+        s.swingAccuracy += s.accuracyDir * 2 * meterSpeed;
         if (s.swingAccuracy >= 100) { s.swingAccuracy = 100; s.accuracyDir = -2; }
         if (s.swingAccuracy <= 0) { s.swingAccuracy = 0; s.accuracyDir = 2; }
       }
