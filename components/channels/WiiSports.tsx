@@ -9,6 +9,7 @@ interface Props { onBack: () => void; theme: WiiTheme }
 type Sport = 'menu' | 'baseball' | 'basketball' | 'boxing' | 'tennis' | 'golf' | 'arcade';
 type ArcadeGame = 'snake' | 'pacman';
 type Difficulty = 'easy' | 'medium' | 'hard';
+type GameMode = '1p' | '2p';
 
 const sports = [
   { id: 'baseball' as Sport, name: 'Baseball', emoji: '⚾', color: 'from-red-500 to-red-600' },
@@ -44,7 +45,7 @@ const PITCH_INFO: Record<PitchType, { speed: number; move: number; name: string;
   changeup: { speed: 0.6, move: 0.5, name: 'Changeup', color: '#22c55e' },
 };
 
-function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
+function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState({ player: 0, cpu: 0, inning: 1, outs: 0, strikes: 0, balls: 0, batting: true, gameOver: false, message: 'Tap to swing!' });
 
@@ -85,6 +86,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
     const g = gRef.current;
     let raf: number;
 
+    const p2Label = gameMode === '2p' ? 'P2' : 'CPU';
     const syncHud = (msg: string) => {
       setHud({ player: g.playerScore, cpu: g.cpuScore, inning: g.inning, outs: g.outs, strikes: g.strikes, balls: g.balls, batting: g.batting, gameOver: g.gameOver, message: msg });
     };
@@ -194,7 +196,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       g.swingAnim = 1;
       const quality = 1 - timing / sweetSpot;
       const r = Math.random();
-      const tag = cpu ? 'CPU ' : '';
+      const tag = cpu ? `${p2Label} ` : (gameMode === '2p' ? 'P1 ' : '');
       g.strikes = 0; g.balls = 0;
       g.shakeTimer = 6; g.shakeIntensity = quality > 0.5 ? 4 : 2;
       spawnParticles(W / 2, H * 0.74, 6, '#fff');
@@ -280,20 +282,21 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         g.ballZ += pitchSpd * pi.speed;
         g.pitchCurveOffset = Math.sin(g.ballZ * Math.PI) * pi.move * 20;
         g.pitchAnim = Math.max(0, g.pitchAnim - 0.04);
-        // Player swing
-        // Timing indicator for player
-        if (g.batting) {
+        // Human swing (P1 when batting, P2 when not batting in 2P)
+        const isHumanBatting = g.batting || (gameMode === '2p' && !g.batting);
+        // Timing indicator for human batter
+        if (isHumanBatting) {
           const dist = Math.abs(g.ballZ - 0.82);
           g.timingIndicator = Math.max(0, 1 - dist / 0.3);
         }
-        if (g.batting && g.clicked) {
+        if (isHumanBatting && g.clicked) {
           g.clicked = false;
+          const isCpu = !g.batting; // P2 is on the "cpu" side
           const timing = Math.abs(g.ballZ - 0.82);
-          if (timing < sweetSpot) { processSwing(timing, false); }
+          if (timing < sweetSpot) { processSwing(timing, isCpu); }
           else if (timing < sweetSpot * 2.5 && g.ballZ > 0.3) {
             g.swingAnim = 1;
             if (g.strikes < 2) g.strikes++;
-            // Foul ball flight animation
             g.foulBallX = W / 2;
             g.foulBallY = H * 0.74;
             g.foulBallVX = (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4);
@@ -303,8 +306,8 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
             syncHud(`Foul ball! (${g.strikes}-${g.balls})`);
           } else { g.swingAnim = 1; g.streak = 0; advanceCount(true); }
         }
-        // CPU swing
-        if (!g.batting && !g.cpuDecided && g.ballZ >= g.cpuSwingZ) {
+        // CPU swing (1P only)
+        if (gameMode === '1p' && !g.batting && !g.cpuDecided && g.ballZ >= g.cpuSwingZ) {
           g.cpuDecided = true;
           if (Math.random() < cpuContact) {
             processSwing(Math.random() * sweetSpot * 1.5, true);
@@ -326,7 +329,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
         if (g.timer <= 0) {
           if (g.gameOver) { syncHud('Game Over!'); return; }
           g.phase = 'idle'; g.timer = g.batting ? 40 : 28;
-          syncHud(g.batting ? 'You\'re up!' : 'CPU at bat...');
+          syncHud(g.batting ? (gameMode === '2p' ? 'P1 at bat!' : 'You\'re up!') : `${p2Label} at bat...`);
         }
       }
       g.swingAnim = Math.max(0, g.swingAnim - 0.05);
@@ -480,7 +483,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       ctx.stroke(); ctx.lineCap = 'butt';
 
       // Strike zone
-      if (g.batting && (g.phase === 'idle' || g.phase === 'pitch')) {
+      if ((g.batting || gameMode === '2p') && (g.phase === 'idle' || g.phase === 'pitch')) {
         ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
         ctx.strokeRect(W / 2 - 30, H * 0.66, 60, H * 0.1);
@@ -528,7 +531,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       }
 
       // Timing indicator (when batting)
-      if (g.batting && g.phase === 'pitch' && g.timingIndicator > 0.2) {
+      if ((g.batting || (gameMode === '2p' && !g.batting)) && g.phase === 'pitch' && g.timingIndicator > 0.2) {
         const tAlpha = g.timingIndicator;
         const tColor = tAlpha > 0.8 ? '#22c55e' : tAlpha > 0.5 ? '#eab308' : '#ef4444';
         ctx.strokeStyle = tColor;
@@ -572,9 +575,9 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       ctx.beginPath(); ctx.roundRect(W / 2 - 185, 5, 370, 48, 8); ctx.fill();
       // Scores
       ctx.font = 'bold 14px system-ui, sans-serif'; ctx.textAlign = 'left';
-      ctx.fillStyle = '#90ee90'; ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 170, 24);
+      ctx.fillStyle = '#90ee90'; ctx.fillText(`${gameMode === '2p' ? 'P1' : 'YOU'}  ${g.playerScore}`, W / 2 - 170, 24);
       ctx.fillStyle = '#ff9b9b'; ctx.textAlign = 'right';
-      ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 170, 24);
+      ctx.fillText(`${p2Label}  ${g.cpuScore}`, W / 2 + 170, 24);
       // Inning
       ctx.textAlign = 'center'; ctx.fillStyle = '#bbb'; ctx.font = '11px system-ui, sans-serif';
       ctx.fillText(`INNING ${g.inning}`, W / 2, 20);
@@ -615,7 +618,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
       ctx.beginPath(); ctx.roundRect(W / 2 - 38, H - 26, 76, 19, 5); ctx.fill();
       ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
       ctx.fillStyle = g.batting ? '#90ee90' : '#87ceeb';
-      ctx.fillText(g.batting ? 'BATTING' : 'PITCHING', W / 2, H - 13);
+      ctx.fillText(g.batting ? (gameMode === '2p' ? 'P1 BATTING' : 'BATTING') : (gameMode === '2p' ? 'P2 BATTING' : 'PITCHING'), W / 2, H - 13);
 
       // Result banner
       if ((g.phase === 'hit_fly' && g.hitBallT > 0.35) || g.phase === 'result') {
@@ -631,7 +634,7 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
     };
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
-  }, [difficulty, maxInnings, sweetSpot, pitchSpd, cpuContact]);
+  }, [difficulty, gameMode, maxInnings, sweetSpot, pitchSpd, cpuContact]);
 
   return (
     <div className="flex flex-col items-center gap-2 p-2">
@@ -643,10 +646,10 @@ function Baseball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () =
           className="px-8 py-3 bg-white text-red-600 font-bold rounded-xl hover:scale-105 active:scale-90 transition-transform shadow-lg text-sm"
         >SWING!</button>
       </div>
-      <p className="text-white/50 text-xs">{hud.batting ? 'Tap to swing!' : 'CPU at bat...'}</p>
+      <p className="text-white/50 text-xs">{hud.batting ? (gameMode === '2p' ? 'P1: Tap to swing!' : 'Tap to swing!') : (gameMode === '2p' ? 'P2: Tap to swing!' : 'CPU at bat...')}</p>
       {hud.gameOver && (
         <div className="space-y-2 text-center">
-          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN!' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
+          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? (gameMode === '2p' ? 'P1 WINS!' : 'YOU WIN!') : hud.player < hud.cpu ? (gameMode === '2p' ? 'P2 WINS!' : 'CPU Wins!') : 'TIE!'}</p>
           <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
         </div>
       )}
@@ -669,7 +672,7 @@ const SHOT_SPOTS = [
 ];
 
 // ═══════ BASKETBALL (Canvas) ═══════
-function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
+function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState({ player: 0, cpu: 0, time: 45, playerTurn: true, gameOver: false, message: 'Click to shoot!' });
 
@@ -709,6 +712,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
 
     const rimX = 490, rimY = 168, bbX = 518;
 
+    const p2Label = gameMode === '2p' ? 'P2' : 'CPU';
     const syncHud = (msg: string) => {
       setHud({ player: g.playerScore, cpu: g.cpuScore, time: Math.ceil(Math.max(0, g.timeLeft)), playerTurn: g.playerTurn, gameOver: g.gameOver, message: msg });
     };
@@ -740,7 +744,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
 
     const shotResult = () => {
       const spot = SHOT_SPOTS[g.shotSpot];
-      const tag = g.playerTurn ? '' : 'CPU ';
+      const tag = g.playerTurn ? '' : `${p2Label} `;
       if (g.made) {
         const pts = spot.pts;
         if (g.playerTurn) g.playerScore += pts; else g.cpuScore += pts;
@@ -768,7 +772,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       g.targetSpot = (g.shotSpot + 1 + Math.floor(Math.random() * 2)) % SHOT_SPOTS.length;
       g.phase = 'moving'; g.moveProgress = 0;
       g.rimBounce = 0; g.netAnim = 0;
-      syncHud(g.playerTurn ? 'Moving to spot...' : 'CPU moving...');
+      syncHud(g.playerTurn ? 'Moving to spot...' : `${p2Label} moving...`);
     };
 
     const onClick = () => { g.clicked = true; };
@@ -806,25 +810,26 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
           g.shotSpot = g.targetSpot;
           g.playerX = to.x; g.playerY = to.y;
           g.phase = 'idle'; g.timer = 15;
-          syncHud(g.playerTurn ? 'Click to shoot!' : 'CPU shooting...');
+          syncHud(g.playerTurn ? 'Click to shoot!' : `${p2Label} shooting...`);
         }
       } else if (g.phase === 'idle') {
         g.timer--;
         if (g.timer <= 0 && !g.gameOver) {
           const spot = SHOT_SPOTS[g.shotSpot];
+          const isHuman = g.playerTurn || gameMode === '2p';
           // Dunk check
-          if (g.playerTurn && (spot as { dunk?: boolean }).dunk) {
+          if (isHuman && (spot as { dunk?: boolean }).dunk) {
             g.phase = 'aiming'; g.power = 0; g.powerDir = 1.8;
-            syncHud('Click to DUNK!');
-          } else if (g.playerTurn) {
+            syncHud(g.playerTurn ? 'Click to DUNK!' : `${p2Label}: Click to DUNK!`);
+          } else if (isHuman) {
             g.phase = 'aiming'; g.power = 0; g.powerDir = 1.4;
-            syncHud('Click to shoot!');
+            syncHud(g.playerTurn ? 'Click to shoot!' : `${p2Label}: Click to shoot!`);
           } else {
             const acc = Math.random() < cpuMake ? Math.random() * threshold * 0.8 : threshold + Math.random() * 20;
             launchBall(acc, threshold * 0.3);
           }
         }
-        if (g.playerTurn && g.clicked && g.timer > 0) { g.clicked = false; g.timer = 0; }
+        if ((g.playerTurn || gameMode === '2p') && g.clicked && g.timer > 0) { g.clicked = false; g.timer = 0; }
       } else if (g.phase === 'aiming') {
         g.power += g.powerDir * (difficulty === 'hard' ? 2.8 : 1.4);
         if (g.power >= 100) { g.power = 100; g.powerDir = -1; }
@@ -847,11 +852,11 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
           const spot = SHOT_SPOTS[g.shotSpot];
           if (g.playerTurn) { g.playerScore += spot.pts; g.streak++; if (g.streak >= 3) g.onFire = true; }
           else g.cpuScore += spot.pts;
-          g.resultText = g.playerTurn ? 'SLAM DUNK!' : 'CPU DUNK!';
+          g.resultText = g.playerTurn ? 'SLAM DUNK!' : `${p2Label} DUNK!`;
           g.resultColor = '#f97316';
           g.netAnim = 1; g.rimBounce = 0.8;
           spawnBBParticles(rimX - 12, rimY, 15, '#f97316');
-          syncHud(g.playerTurn ? 'SLAM DUNK!' : 'CPU Dunks!');
+          syncHud(g.playerTurn ? 'SLAM DUNK!' : `${p2Label} Dunks!`);
           g.phase = 'result'; g.timer = 55;
         }
       } else if (g.phase === 'flying') {
@@ -1070,7 +1075,7 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       ctx.beginPath(); ctx.roundRect(W / 2 - 140, 6, 280, 34, 10); ctx.stroke();
       ctx.font = 'bold 14px system-ui, sans-serif';
       ctx.textAlign = 'left'; ctx.fillStyle = '#3b82f6';
-      ctx.fillText(`YOU  ${g.playerScore}`, W / 2 - 125, 28);
+      ctx.fillText(`${gameMode === '2p' ? 'P1' : 'YOU'}  ${g.playerScore}`, W / 2 - 125, 28);
       ctx.textAlign = 'center';
       ctx.fillStyle = '#555'; ctx.font = 'bold 18px system-ui, sans-serif';
       ctx.fillText(`${Math.ceil(Math.max(0, g.timeLeft))}`, W / 2, 30);
@@ -1078,14 +1083,14 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
       ctx.fillText('SEC', W / 2, 17);
       ctx.font = 'bold 14px system-ui, sans-serif';
       ctx.textAlign = 'right'; ctx.fillStyle = '#ef4444';
-      ctx.fillText(`CPU  ${g.cpuScore}`, W / 2 + 125, 28);
+      ctx.fillText(`${p2Label}  ${g.cpuScore}`, W / 2 + 125, 28);
 
       // Shot label
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
       ctx.beginPath(); ctx.roundRect(W / 2 - 42, H - 26, 84, 18, 5); ctx.fill();
       ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
       ctx.fillStyle = '#555';
-      ctx.fillText(`${spot.pts}PT • ${g.playerTurn ? 'YOU' : 'CPU'}`, W / 2, H - 13);
+      ctx.fillText(`${spot.pts}PT • ${g.playerTurn ? (gameMode === '2p' ? 'P1' : 'YOU') : p2Label}`, W / 2, H - 13);
 
       // Result banner
       if (g.phase === 'result' && g.timer > 12) {
@@ -1100,16 +1105,16 @@ function Basketball({ difficulty, onExit }: { difficulty: Difficulty; onExit: ()
     };
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
-  }, [difficulty, threshold, cpuMake, gameTime]);
+  }, [difficulty, gameMode, threshold, cpuMake, gameTime]);
 
   return (
     <div className="flex flex-col items-center gap-3 p-4">
       <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
       <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
-      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Click to shoot!' : 'CPU shooting...'}</p>
+      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Click to shoot!' : `${gameMode === '2p' ? 'P2' : 'CPU'} shooting...`}</p>
       {hud.gameOver && (
         <div className="space-y-2 text-center">
-          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? 'YOU WIN! 🏆' : hud.player < hud.cpu ? 'CPU Wins!' : 'TIE!'}</p>
+          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? (gameMode === '2p' ? 'P1 WINS! 🏆' : 'YOU WIN! 🏆') : hud.player < hud.cpu ? (gameMode === '2p' ? 'P2 WINS!' : 'CPU Wins!') : 'TIE!'}</p>
           <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
         </div>
       )}
@@ -1131,7 +1136,7 @@ interface BoxerState {
   lastBlockTime: number;
 }
 
-function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
+function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<{
     player: BoxerState; cpu: BoxerState;
@@ -1313,11 +1318,43 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     const handleKeyDown = (e: KeyboardEvent) => {
       const s = stateRef.current;
       if (!s) return;
-      s.keys.add(e.key.toLowerCase());
+      const key = e.key.toLowerCase();
+      s.keys.add(key);
 
       // Mash to get up from knockdown
       if (s.player.down && s.roundPhase === 'countdown' && s.koTarget === 'player') {
-        s.player.getUpMashes++;
+        if (gameMode === '1p' || 'wasdqerfgt '.includes(key)) s.player.getUpMashes++;
+      }
+      // P2 mash to get up
+      if (gameMode === '2p' && s.cpu.down && s.roundPhase === 'countdown' && s.koTarget === 'cpu') {
+        if ('arrowup arrowdown arrowleft arrowright jkui,.shift'.includes(key) || key.startsWith('arrow')) s.cpu.getUpMashes++;
+      }
+
+      if (s.roundPhase !== 'fight') return;
+      const hand: 'L' | 'R' = Math.random() < 0.5 ? 'L' : 'R';
+
+      // P1 keyboard punches
+      if (gameMode === '2p') {
+        // 2P: P1 uses F/G/R/T
+        if (key === 'f') punch(s.player, s.cpu, 'jab', hand);
+        else if (key === 'g') punch(s.player, s.cpu, 'hook', 'L');
+        else if (key === 'r') punch(s.player, s.cpu, 'uppercut', 'R');
+        else if (key === 't') punch(s.player, s.cpu, 'body', 'L');
+      } else {
+        // 1P: P1 uses J/K/H/U/B
+        if (key === 'j') punch(s.player, s.cpu, 'jab', 'L');
+        else if (key === 'k') punch(s.player, s.cpu, 'jab', 'R');
+        else if (key === 'h') punch(s.player, s.cpu, 'hook', 'L');
+        else if (key === 'u') punch(s.player, s.cpu, 'uppercut', 'R');
+        else if (key === 'b') punch(s.player, s.cpu, 'body', 'L');
+      }
+
+      // P2 keyboard punches (2P only)
+      if (gameMode === '2p') {
+        if (key === 'j') punch(s.cpu, s.player, 'jab', hand);
+        else if (key === 'k') punch(s.cpu, s.player, 'hook', 'L');
+        else if (key === 'u') punch(s.cpu, s.player, 'uppercut', 'R');
+        else if (key === 'i') punch(s.cpu, s.player, 'body', 'L');
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -1663,9 +1700,9 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('YOU', 18, 27);
+      ctx.fillText(gameMode === '2p' ? 'P1' : 'YOU', 18, 27);
       ctx.textAlign = 'right';
-      ctx.fillText('CPU', W - 18, 27);
+      ctx.fillText(gameMode === '2p' ? 'P2' : 'CPU', W - 18, 27);
 
       // Stamina bar (player)
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
@@ -1713,15 +1750,17 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.strokeText(`${s.countdownNum}`, W / 2, H * 0.55);
         ctx.fillText(`${s.countdownNum}`, W / 2, H * 0.55);
 
-        // Mash prompt for player
-        if (s.koTarget === 'player') {
+        // Mash prompt
+        if (s.koTarget === 'player' || (s.koTarget === 'cpu' && gameMode === '2p')) {
+          const downed = s.koTarget === 'player' ? s.player : s.cpu;
+          const label = s.koTarget === 'player' ? (gameMode === '2p' ? 'P1' : 'YOU') : 'P2';
           const flashAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 100);
           ctx.globalAlpha = flashAlpha;
           ctx.font = 'bold 16px sans-serif';
           ctx.fillStyle = '#fbbf24';
-          ctx.fillText('MASH ANY KEY TO GET UP!', W / 2, H * 0.65);
+          ctx.fillText(`${label}: MASH KEYS TO GET UP!`, W / 2, H * 0.65);
           ctx.font = '13px sans-serif';
-          ctx.fillText(`Mashes: ${s.player.getUpMashes} / ${5 + s.player.knockdownCount * 3}`, W / 2, H * 0.70);
+          ctx.fillText(`Mashes: ${downed.getUpMashes} / ${5 + downed.knockdownCount * 3}`, W / 2, H * 0.70);
           ctx.globalAlpha = 1;
         }
       }
@@ -1734,9 +1773,12 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.fillStyle = '#fbbf24';
         ctx.textAlign = 'center';
         if (s.koTarget) {
-          ctx.fillText(s.koTarget === 'cpu' ? 'KNOCKOUT! YOU WIN!' : 'KO! YOU LOSE...', W / 2, H * 0.4);
+          const p1Win = s.koTarget === 'cpu';
+          ctx.fillText(p1Win ? `KNOCKOUT! ${gameMode === '2p' ? 'P1' : 'YOU'} WIN!` : `KO! ${gameMode === '2p' ? 'P2' : 'CPU'} WINS!`, W / 2, H * 0.4);
         } else {
-          ctx.fillText(s.playerScore > s.cpuScore ? 'DECISION: YOU WIN!' : s.cpuScore > s.playerScore ? 'DECISION: CPU WINS!' : 'DRAW!', W / 2, H * 0.4);
+          const p1Win = s.playerScore > s.cpuScore;
+          const tie = s.playerScore === s.cpuScore;
+          ctx.fillText(tie ? 'DRAW!' : p1Win ? `DECISION: ${gameMode === '2p' ? 'P1' : 'YOU'} WIN!` : `DECISION: ${gameMode === '2p' ? 'P2' : 'CPU'} WINS!`, W / 2, H * 0.4);
         }
         ctx.font = '18px sans-serif';
         ctx.fillStyle = '#fff';
@@ -1769,9 +1811,14 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.textAlign = 'center';
         ctx.fillText('CONTROLS', W / 2, H * 0.78);
         ctx.font = '11px sans-serif';
-        ctx.fillText('J/K = Left/Right Jab | H = Hook | U = Uppercut | B = Body', W / 2, H * 0.83);
-        ctx.fillText('A/D = Move | SPACE = Block | Q/E = Dodge | W = Forward', W / 2, H * 0.88);
-        ctx.fillText('Or use the buttons below!', W / 2, H * 0.93);
+        if (gameMode === '2p') {
+          ctx.fillText('P1: WASD=Move | SPACE=Block | Q/E=Dodge | F=Jab G=Hook R=Upper T=Body', W / 2, H * 0.83);
+          ctx.fillText('P2: Arrows=Move | SHIFT=Block | ,/.=Dodge | J=Jab K=Hook U=Upper I=Body', W / 2, H * 0.88);
+        } else {
+          ctx.fillText('J/K = Left/Right Jab | H = Hook | U = Uppercut | B = Body', W / 2, H * 0.83);
+          ctx.fillText('A/D = Move | SPACE = Block | Q/E = Dodge | W = Forward', W / 2, H * 0.88);
+          ctx.fillText('Or use the buttons below!', W / 2, H * 0.93);
+        }
         ctx.globalAlpha = 1;
       }
     }
@@ -1878,7 +1925,9 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
 
           // Check get up
           const mashNeeded = 5 + downed.knockdownCount * 3;
-          const cpuGetsUp = s.koTarget === 'cpu' && downed.hp > 0 && Math.random() < (0.7 - downed.knockdownCount * 0.2);
+          const cpuGetsUp = s.koTarget === 'cpu' && downed.hp > 0 && (
+            gameMode === '2p' ? downed.getUpMashes >= mashNeeded : Math.random() < (0.7 - downed.knockdownCount * 0.2)
+          );
 
           if (s.koTarget === 'player' && downed.getUpMashes >= mashNeeded && downed.hp > 0) {
             // Player gets up!
@@ -1889,13 +1938,13 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
             s.koTarget = null;
             s.message = "You're back up!";
             s.messageTimer = 50;
-          } else if (cpuGetsUp && s.countdownNum >= 4) {
+          } else if (cpuGetsUp && (gameMode === '2p' || s.countdownNum >= 4)) {
             downed.down = false;
             downed.hp = Math.max(downed.hp, 10);
             downed.stamina = 20;
             s.roundPhase = 'fight';
             s.koTarget = null;
-            s.message = 'CPU gets up!';
+            s.message = `${gameMode === '2p' ? 'P2' : 'CPU'} gets up!`;
             s.messageTimer = 50;
           }
 
@@ -2012,29 +2061,45 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       if (p.dodgeTimer > 0) p.dodgeTimer--;
       if (cpu.dodgeTimer > 0) cpu.dodgeTimer--;
 
-      // Player input
+      // P1 input
       if (!p.down && p.stunTimer <= 0) {
-        // Movement
-        if (s.keys.has('a') || s.keys.has('arrowleft')) p.x = Math.max(W * 0.1, p.x - 2.5);
-        if (s.keys.has('d') || s.keys.has('arrowright')) p.x = Math.min(W * 0.55, p.x + 2.5);
-        if (s.keys.has('w') || s.keys.has('arrowup')) p.x = Math.min(p.x + 1.5, cpu.x - 60);
+        // Movement (WASD; arrows only in 1P)
+        if (s.keys.has('a') || (gameMode === '1p' && s.keys.has('arrowleft'))) p.x = Math.max(W * 0.1, p.x - 2.5);
+        if (s.keys.has('d') || (gameMode === '1p' && s.keys.has('arrowright'))) p.x = Math.min(W * 0.55, p.x + 2.5);
+        if (s.keys.has('w') || (gameMode === '1p' && s.keys.has('arrowup'))) p.x = Math.min(p.x + 1.5, cpu.x - 60);
 
         // Block
         p.blocking = s.keys.has(' ');
 
         // Dodge
-        if ((s.keys.has('q')) && p.dodgeTimer <= 0 && !p.blocking) {
-          p.dodgeDir = -1;
-          p.dodgeTimer = 15;
+        if (s.keys.has('q') && p.dodgeTimer <= 0 && !p.blocking) {
+          p.dodgeDir = -1; p.dodgeTimer = 15;
         }
-        if ((s.keys.has('e')) && p.dodgeTimer <= 0 && !p.blocking) {
-          p.dodgeDir = 1;
-          p.dodgeTimer = 15;
+        if (s.keys.has('e') && p.dodgeTimer <= 0 && !p.blocking) {
+          p.dodgeDir = 1; p.dodgeTimer = 15;
         }
       }
 
-      // CPU AI
-      updateCPU(s);
+      // P2 input (2P) or CPU AI (1P)
+      if (gameMode === '2p') {
+        if (!cpu.down && cpu.stunTimer <= 0) {
+          // P2 movement: arrow keys
+          if (s.keys.has('arrowleft')) cpu.x = Math.max(W * 0.45, cpu.x - 2.5);
+          if (s.keys.has('arrowright')) cpu.x = Math.min(W * 0.92, cpu.x + 2.5);
+          if (s.keys.has('arrowdown')) cpu.x = Math.max(cpu.x - 1.5, p.x + 60);
+          // P2 block: Shift
+          cpu.blocking = s.keys.has('shift');
+          // P2 dodge: comma/period
+          if (s.keys.has(',') && cpu.dodgeTimer <= 0 && !cpu.blocking) {
+            cpu.dodgeDir = -1; cpu.dodgeTimer = 15;
+          }
+          if (s.keys.has('.') && cpu.dodgeTimer <= 0 && !cpu.blocking) {
+            cpu.dodgeDir = 1; cpu.dodgeTimer = 15;
+          }
+        }
+      } else {
+        updateCPU(s);
+      }
 
       // Keep boxers in bounds
       p.x = Math.max(W * 0.08, Math.min(W * 0.55, p.x));
@@ -2104,7 +2169,7 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [punch, cpuAggression, cpuBlockChance, cpuDodgeChance]);
+  }, [punch, gameMode, cpuAggression, cpuBlockChance, cpuDodgeChance]);
 
   // Button handlers for mobile/click
   const doAttack = (type: string, hand: 'L' | 'R') => {
@@ -2191,7 +2256,7 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
 }
 
 // ═══════ TENNIS (Wii Sports Style) ═══════
-function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
+function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const [, forceUpdate] = useState(0);
@@ -2238,11 +2303,14 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
     return ['0', '15', '30', '40'][pts] || '40';
   }
 
+  const p1Label = gameMode === '2p' ? 'P1' : 'YOU';
+  const p2Label = gameMode === '2p' ? 'P2' : 'CPU';
+
   function scoreString(s: NonNullable<typeof stateRef.current>): string {
     if (s.playerPoints >= 3 && s.cpuPoints >= 3) {
       if (s.playerPoints === s.cpuPoints) return 'Deuce';
-      if (s.playerPoints > s.cpuPoints) return 'Ad - YOU';
-      return 'Ad - CPU';
+      if (s.playerPoints > s.cpuPoints) return `Ad - ${p1Label}`;
+      return `Ad - ${p2Label}`;
     }
     return `${pointName(s.playerPoints)} - ${pointName(s.cpuPoints)}`;
   }
@@ -2435,7 +2503,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         s.playerPoints = 0;
         s.cpuPoints = 0;
         s.server = s.server === 'player' ? 'cpu' : 'player';
-        s.message = `Game - ${gameWon === 'player' ? 'YOU' : 'CPU'}!`;
+        s.message = `Game - ${gameWon === 'player' ? p1Label : p2Label}!`;
 
         // Check set win
         const pg = s.playerGames, cg = s.cpuGames;
@@ -2445,12 +2513,12 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
           else s.cpuSets++;
           s.playerGames = 0;
           s.cpuGames = 0;
-          s.message = `Set - ${setWon === 'player' ? 'YOU' : 'CPU'}!`;
+          s.message = `Set - ${setWon === 'player' ? p1Label : p2Label}!`;
 
           // Check match
           if (s.playerSets >= 2 || s.cpuSets >= 2) {
             s.matchOver = true;
-            s.winner = s.playerSets >= 2 ? 'YOU WIN!' : 'CPU Wins!';
+            s.winner = s.playerSets >= 2 ? `${p1Label} WIN${gameMode === '2p' ? 'S' : ''}!` : `${p2Label} Wins!`;
             s.phase = 'gameOver';
             s.message = s.winner;
           }
@@ -2496,9 +2564,13 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       // Serve timer
       if (s.serveTimer > 0) s.serveTimer--;
 
-      // CPU serve
+      // P2/CPU serve
       if (s.serving && s.server === 'cpu' && s.serveTimer <= 0) {
-        doServe(s, 'cpu');
+        if (gameMode === '2p') {
+          if (s.keys.has('enter')) doServe(s, 'cpu');
+        } else {
+          doServe(s, 'cpu');
+        }
       }
 
       // Stamina regen
@@ -2519,22 +2591,22 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       // Particles
       s.particles = s.particles.filter(p => { p.x += p.vx; p.y += p.vy; p.life--; return p.life > 0; });
 
-      // Player movement (keyboard + mouse hybrid)
+      // P1 movement (WASD; arrows only in 1P)
       const moveSpeed = 3.5;
-      if (s.keys.has('a') || s.keys.has('arrowleft')) s.playerX -= moveSpeed;
-      if (s.keys.has('d') || s.keys.has('arrowright')) s.playerX += moveSpeed;
-      if (s.keys.has('w') || s.keys.has('arrowup')) s.playerY -= moveSpeed * 0.7;
-      if (s.keys.has('s') || s.keys.has('arrowdown')) s.playerY += moveSpeed * 0.7;
+      if (s.keys.has('a') || (gameMode === '1p' && s.keys.has('arrowleft'))) s.playerX -= moveSpeed;
+      if (s.keys.has('d') || (gameMode === '1p' && s.keys.has('arrowright'))) s.playerX += moveSpeed;
+      if (s.keys.has('w') || (gameMode === '1p' && s.keys.has('arrowup'))) s.playerY -= moveSpeed * 0.7;
+      if (s.keys.has('s') || (gameMode === '1p' && s.keys.has('arrowdown'))) s.playerY += moveSpeed * 0.7;
 
-      // Mouse pull (gentle)
+      // Mouse pull (gentle, P1 only)
       s.playerX += (s.mouseX - s.playerX) * 0.04;
       s.playerY += (s.mouseY - s.playerY) * 0.02;
 
-      // Clamp player
+      // Clamp P1
       s.playerX = Math.max(COURT_LEFT - 20, Math.min(COURT_RIGHT + 20, s.playerX));
       s.playerY = Math.max(NET_Y + 20, Math.min(H - 15, s.playerY));
 
-      // Auto-swing for player when ball is close
+      // P1 swing when ball is close
       if (s.ballActive && s.playerSwing <= 0 && !s.serving) {
         const dist = Math.sqrt((s.ballX - s.playerX) ** 2 + (s.ballY - s.playerY) ** 2);
         if (dist < 45 && s.ballY > NET_Y && s.ballZ < 30 && s.lastHitter !== 'player') {
@@ -2544,33 +2616,38 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         }
       }
 
-      // CPU movement
-      if (s.ballActive && !s.serving) {
-        let targetX = s.ballX;
-        let targetY = s.ballY - 15;
-
-        if (s.lastHitter === 'cpu') {
-          // Return to center after hitting
-          targetX = W / 2;
-          targetY = COURT_TOP + 40;
-        }
-
-        const cpuMoveSpeed = 2 + cpuSkill * 2;
-        s.cpuX += (targetX - s.cpuX) * 0.05 * cpuMoveSpeed;
-        s.cpuY += (targetY - s.cpuY) * 0.03 * cpuMoveSpeed;
+      // P2/CPU movement
+      if (gameMode === '2p') {
+        // P2 uses arrow keys
+        if (s.keys.has('arrowleft')) s.cpuX -= moveSpeed;
+        if (s.keys.has('arrowright')) s.cpuX += moveSpeed;
+        if (s.keys.has('arrowup')) s.cpuY -= moveSpeed * 0.7;
+        if (s.keys.has('arrowdown')) s.cpuY += moveSpeed * 0.7;
       } else {
-        s.cpuX += (W / 2 - s.cpuX) * 0.03;
-        s.cpuY += ((COURT_TOP + 40) - s.cpuY) * 0.03;
+        // CPU AI movement
+        if (s.ballActive && !s.serving) {
+          let targetX = s.ballX;
+          let targetY = s.ballY - 15;
+          if (s.lastHitter === 'cpu') { targetX = W / 2; targetY = COURT_TOP + 40; }
+          const cpuMoveSpeed = 2 + cpuSkill * 2;
+          s.cpuX += (targetX - s.cpuX) * 0.05 * cpuMoveSpeed;
+          s.cpuY += (targetY - s.cpuY) * 0.03 * cpuMoveSpeed;
+        } else {
+          s.cpuX += (W / 2 - s.cpuX) * 0.03;
+          s.cpuY += ((COURT_TOP + 40) - s.cpuY) * 0.03;
+        }
       }
       s.cpuX = Math.max(COURT_LEFT - 20, Math.min(COURT_RIGHT + 20, s.cpuX));
       s.cpuY = Math.max(15, Math.min(NET_Y - 20, s.cpuY));
 
-      // CPU swing
+      // P2/CPU swing
       if (s.ballActive && s.cpuSwing <= 0 && s.lastHitter !== 'cpu') {
         const dist = Math.sqrt((s.ballX - s.cpuX) ** 2 + (s.ballY - s.cpuY) ** 2);
         if (dist < 50 && s.ballY < NET_Y && s.ballZ < 30) {
-          if (Math.random() < cpuSkill * 0.8 + 0.15) {
-            attemptSwing(s, 'cpu');
+          if (gameMode === '2p') {
+            if (s.keys.has('enter')) attemptSwing(s, 'cpu');
+          } else {
+            if (Math.random() < cpuSkill * 0.8 + 0.15) attemptSwing(s, 'cpu');
           }
         }
       }
@@ -2846,7 +2923,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       ctx.fillStyle = '#3b82f6';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText('YOU', W / 2 - 80, 32);
+      ctx.fillText(p1Label, W / 2 - 80, 32);
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 14px sans-serif';
@@ -2858,7 +2935,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       ctx.fillStyle = '#ef4444';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText('CPU', W / 2 - 80, 48);
+      ctx.fillText(p2Label, W / 2 - 80, 48);
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 14px sans-serif';
@@ -2879,7 +2956,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.globalAlpha = flash;
         ctx.font = 'bold 14px sans-serif';
         ctx.fillStyle = '#fbbf24';
-        ctx.fillText(s.server === 'player' ? 'CLICK TO SERVE' : 'CPU SERVING...', W / 2, H - 15);
+        ctx.fillText(s.server === 'player' ? 'CLICK TO SERVE' : (gameMode === '2p' ? 'P2: ENTER TO SERVE' : 'CPU SERVING...'), W / 2, H - 15);
         ctx.globalAlpha = 1;
       }
 
@@ -2915,7 +2992,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
         ctx.fillText(s.winner, W / 2, H * 0.4);
         ctx.font = '16px sans-serif';
         ctx.fillStyle = '#fff';
-        ctx.fillText(`Sets: ${s.playerSets} - ${s.cpuSets}`, W / 2, H * 0.5);
+        ctx.fillText(`Sets: ${s.playerSets} (${p1Label}) - ${s.cpuSets} (${p2Label})`, W / 2, H * 0.5);
         ctx.font = '13px sans-serif';
         ctx.fillStyle = '#ccc';
         ctx.fillText('Click to continue', W / 2, H * 0.62);
@@ -2952,7 +3029,7 @@ function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
       canvas.removeEventListener('touchmove', handleTouch);
       canvas.removeEventListener('click', handleClick);
     };
-  }, [cpuSkill]);
+  }, [cpuSkill, gameMode, p1Label, p2Label]);
 
   const doSwing = () => {
     const s = stateRef.current;
@@ -3010,7 +3087,7 @@ interface GolfHole {
   name: string;
 }
 
-function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
+function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const [, forceUpdate] = useState(0);
@@ -3091,11 +3168,14 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
     matchOver: boolean;
     introTimer: number;
     landingAnim: number;
-    // New
     distToHole: number;
     particles: { x: number; y: number; vx: number; vy: number; life: number; color: string }[];
     puttingMode: boolean; // true when near hole
     shotDistance: number; // how far last shot went
+    // 2P fields
+    currentPlayer: 1 | 2;
+    p2Scorecard: number[];
+    savedWind: { speed: number; angle: number } | null; // preserve wind for P2
   } | null>(null);
 
   function getScoreName(strokes: number, par: number): string {
@@ -3142,20 +3222,25 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
     return false;
   }
 
-  function initHole(holeIdx: number) {
+  function initHole(holeIdx: number, player?: 1 | 2) {
     const hole = HOLES[holeIdx];
+    const prev = stateRef.current;
+    const isP2Switch = player === 2 && prev;
+    const ws = isP2Switch && prev.savedWind ? prev.savedWind.speed : (0.5 + Math.random() * 2.5) * windMult;
+    const wa = isP2Switch && prev.savedWind ? prev.savedWind.angle : Math.random() * Math.PI * 2;
     stateRef.current = {
       holeIndex: holeIdx,
       strokes: 0,
-      scorecard: stateRef.current?.scorecard || [],
+      scorecard: prev?.scorecard || [],
       ballX: hole.teeX, ballY: hole.teeY, ballZ: 0,
       ballVX: 0, ballVY: 0, ballVZ: 0,
       ballMoving: false, ballInHole: false,
       club: 0, aimAngle: Math.atan2(hole.holeY - hole.teeY, hole.holeX - hole.teeX),
       powerPhase: 'intro', powerLevel: 0, powerDir: 1,
       swingAccuracy: 50, accuracyDir: 1,
-      windSpeed: (0.5 + Math.random() * 2.5) * windMult, windAngle: Math.random() * Math.PI * 2,
-      message: hole.name, messageTimer: 90,
+      windSpeed: ws, windAngle: wa,
+      message: gameMode === '2p' ? `${player === 2 ? 'P2' : 'P1'} — ${hole.name}` : hole.name,
+      messageTimer: 90,
       ballTrail: [], lastBallX: hole.teeX, lastBallY: hole.teeY,
       terrain: 'tee', matchOver: false,
       introTimer: 60, landingAnim: 0,
@@ -3163,6 +3248,9 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       particles: [],
       puttingMode: false,
       shotDistance: 0,
+      currentPlayer: player || 1,
+      p2Scorecard: prev?.p2Scorecard || [],
+      savedWind: player === 1 || !player ? { speed: ws, angle: wa } : prev?.savedWind || null,
     };
   }
 
@@ -3223,14 +3311,33 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
     function nextHole() {
       const s = stateRef.current;
       if (!s) return;
-      s.scorecard.push(s.strokes);
-      if (s.holeIndex + 1 >= maxHoles) {
-        s.matchOver = true;
-        s.message = 'Course Complete!';
-        s.messageTimer = 200;
-        return;
+
+      if (gameMode === '2p') {
+        if (s.currentPlayer === 1) {
+          // Save P1 score, switch to P2 on same hole
+          s.scorecard.push(s.strokes);
+          initHole(s.holeIndex, 2);
+        } else {
+          // Save P2 score, advance hole
+          s.p2Scorecard.push(s.strokes);
+          if (s.holeIndex + 1 >= maxHoles) {
+            s.matchOver = true;
+            s.message = 'Course Complete!';
+            s.messageTimer = 200;
+            return;
+          }
+          initHole(s.holeIndex + 1, 1);
+        }
+      } else {
+        s.scorecard.push(s.strokes);
+        if (s.holeIndex + 1 >= maxHoles) {
+          s.matchOver = true;
+          s.message = 'Course Complete!';
+          s.messageTimer = 200;
+          return;
+        }
+        initHole(s.holeIndex + 1);
       }
-      initHole(s.holeIndex + 1);
     }
 
     function doSwing() {
@@ -3622,7 +3729,14 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(`Hole ${s.holeIndex + 1}/${maxHoles}`, 10, 16);
+      if (gameMode === '2p') {
+        ctx.fillStyle = s.currentPlayer === 1 ? '#3b82f6' : '#ef4444';
+        ctx.fillText(`P${s.currentPlayer}`, 10, 16);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Hole ${s.holeIndex + 1}/${maxHoles}`, 40, 16);
+      } else {
+        ctx.fillText(`Hole ${s.holeIndex + 1}/${maxHoles}`, 10, 16);
+      }
       ctx.font = '11px sans-serif';
       ctx.fillStyle = '#aaa';
       ctx.fillText(hole.name, 10, 32);
@@ -3758,7 +3872,10 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(s.holeIndex + 1 < maxHoles ? 'Click / ENTER for next hole' : 'Click / ENTER for results', W / 2, H * 0.55 + 20);
+        const nextMsg = gameMode === '2p' && s.currentPlayer === 1
+          ? 'Click / ENTER — P2\'s turn'
+          : s.holeIndex + 1 < maxHoles ? 'Click / ENTER for next hole' : 'Click / ENTER for results';
+        ctx.fillText(nextMsg, W / 2, H * 0.55 + 20);
       }
 
       // Match over - scorecard
@@ -3798,10 +3915,10 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
         }
         ctx.fillText(`${totalPar}`, 80 + maxHoles * 50, startY + rowH);
 
-        // Score row
-        ctx.fillStyle = '#fff';
+        // P1 Score row
+        ctx.fillStyle = gameMode === '2p' ? '#3b82f6' : '#fff';
         ctx.textAlign = 'left';
-        ctx.fillText('You', 15, startY + rowH * 2);
+        ctx.fillText(gameMode === '2p' ? 'P1' : 'You', 15, startY + rowH * 2);
         ctx.textAlign = 'center';
         for (let i = 0; i < s.scorecard.length; i++) {
           const diff = s.scorecard[i] - HOLES[i].par;
@@ -3811,10 +3928,37 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
         ctx.fillStyle = '#fff';
         ctx.fillText(`${totalStrokes}`, 80 + maxHoles * 50, startY + rowH * 2);
 
+        // P2 Score row (2P only)
+        let extraRows = 0;
+        if (gameMode === '2p') {
+          extraRows = 1;
+          const p2Total = s.p2Scorecard.reduce((a: number, b: number) => a + b, 0);
+          ctx.fillStyle = '#ef4444';
+          ctx.textAlign = 'left';
+          ctx.fillText('P2', 15, startY + rowH * 3);
+          ctx.textAlign = 'center';
+          for (let i = 0; i < s.p2Scorecard.length; i++) {
+            const diff = s.p2Scorecard[i] - HOLES[i].par;
+            ctx.fillStyle = diff < 0 ? '#22c55e' : diff === 0 ? '#fff' : diff === 1 ? '#eab308' : '#ef4444';
+            ctx.fillText(`${s.p2Scorecard[i]}`, 80 + i * 50, startY + rowH * 3);
+          }
+          ctx.fillStyle = '#fff';
+          ctx.fillText(`${p2Total}`, 80 + maxHoles * 50, startY + rowH * 3);
+        }
+
         // Final score
         ctx.font = 'bold 22px sans-serif';
-        ctx.fillStyle = overUnder < 0 ? '#22c55e' : overUnder === 0 ? '#fbbf24' : '#ef4444';
-        ctx.fillText(overUnder === 0 ? 'Even Par!' : `${overUnder > 0 ? '+' : ''}${overUnder} (${totalStrokes} strokes)`, W / 2, startY + rowH * 4);
+        if (gameMode === '2p') {
+          const p2Total = s.p2Scorecard.reduce((a: number, b: number) => a + b, 0);
+          ctx.fillStyle = totalStrokes < p2Total ? '#3b82f6' : p2Total < totalStrokes ? '#ef4444' : '#fbbf24';
+          ctx.fillText(totalStrokes < p2Total ? 'P1 WINS!' : p2Total < totalStrokes ? 'P2 WINS!' : 'TIE!', W / 2, startY + rowH * (4 + extraRows));
+          ctx.font = '14px sans-serif';
+          ctx.fillStyle = '#ccc';
+          ctx.fillText(`P1: ${totalStrokes} (${overUnder >= 0 ? '+' : ''}${overUnder})  •  P2: ${p2Total} (${p2Total - totalPar >= 0 ? '+' : ''}${p2Total - totalPar})`, W / 2, startY + rowH * (5 + extraRows));
+        } else {
+          ctx.fillStyle = overUnder < 0 ? '#22c55e' : overUnder === 0 ? '#fbbf24' : '#ef4444';
+          ctx.fillText(overUnder === 0 ? 'Even Par!' : `${overUnder > 0 ? '+' : ''}${overUnder} (${totalStrokes} strokes)`, W / 2, startY + rowH * 4);
+        }
 
         ctx.font = '13px sans-serif';
         ctx.fillStyle = '#ccc';
@@ -3855,7 +3999,7 @@ function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => vo
       window.removeEventListener('keydown', handleKey);
       canvas.removeEventListener('click', handleClick);
     };
-  }, [maxHoles]);
+  }, [maxHoles, gameMode]);
 
   // Mobile controls
   const btnClass = "px-3 py-2 font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg";
@@ -4125,71 +4269,109 @@ function PacManGame({ onExit }: { onExit: () => void }) {
 }
 
 // ═══════ GAME INSTRUCTIONS ═══════
-const GAME_INSTRUCTIONS: Record<string, { title: string; emoji: string; lines: string[] }> = {
-  baseball: {
-    title: 'Baseball',
-    emoji: '⚾',
-    lines: [
-      'Tap / Click to swing the bat',
-      'Time your swing when the ball is close',
-      'Green timing circle = perfect swing',
-      'CPU bats after you — play defense!',
-    ],
-  },
-  basketball: {
-    title: 'Basketball',
-    emoji: '🏀',
-    lines: [
-      'Click to start the power meter',
-      'Click again when the bar is in the green zone',
-      'Take turns shooting with the CPU',
-      'Score the most points before time runs out',
-    ],
-  },
-  boxing: {
-    title: 'Boxing',
-    emoji: '🥊',
-    lines: [
-      'Jab, Hook, Uppercut, Body — punch to deal damage',
-      'Hold Block to reduce incoming damage',
-      'Dodge left/right to avoid punches',
-      'Mash buttons to get up from knockdowns!',
-      '',
-      'Keyboard: J/K = Jab | H = Hook | U = Upper | B = Body',
-      'SPACE = Block | Q/E = Dodge | A/D = Move',
-    ],
-  },
-  tennis: {
-    title: 'Tennis',
-    emoji: '🎾',
-    lines: [
-      'Move with mouse or A/D/W/S keys',
-      'Click to serve and swing',
-      'Ball auto-hits when you are close enough',
-      'Press W while swinging for a lob shot',
-      'Real tennis scoring: 15-30-40, games, sets',
-    ],
-  },
-  golf: {
-    title: 'Golf',
-    emoji: '⛳',
-    lines: [
-      'Click once to start the power meter',
-      'Click again to set power (green = good)',
-      'Click a third time to set accuracy (center = straight)',
-      'A/D = Aim direction | W/S = Change club',
-      'Club auto-selects based on distance to hole',
-    ],
-  },
-};
+function getGameInstructions(mode: GameMode): Record<string, { title: string; emoji: string; lines: string[] }> {
+  const is2P = mode === '2p';
+  return {
+    baseball: {
+      title: 'Baseball',
+      emoji: '⚾',
+      lines: is2P ? [
+        'Both players: Click/Tap to swing',
+        'P1 bats first, then P2 bats',
+        'Time your swing when the ball is close',
+        'Green timing circle = perfect swing',
+      ] : [
+        'Tap / Click to swing the bat',
+        'Time your swing when the ball is close',
+        'Green timing circle = perfect swing',
+        'CPU bats after you — play defense!',
+      ],
+    },
+    basketball: {
+      title: 'Basketball',
+      emoji: '🏀',
+      lines: is2P ? [
+        'Both players: Click to shoot',
+        'Click when the power bar is in the green zone',
+        'P1 and P2 take turns shooting',
+        'Score the most points before time runs out',
+      ] : [
+        'Click to start the power meter',
+        'Click again when the bar is in the green zone',
+        'Take turns shooting with the CPU',
+        'Score the most points before time runs out',
+      ],
+    },
+    boxing: {
+      title: 'Boxing',
+      emoji: '🥊',
+      lines: is2P ? [
+        'Real-time 1v1 — both players fight simultaneously!',
+        'Mash keys to get up from knockdowns',
+        '',
+        'P1 (left side keyboard):',
+        'A/D = Move | SPACE = Block | Q/E = Dodge',
+        'F = Jab | G = Hook | R = Uppercut | T = Body',
+        '',
+        'P2 (right side keyboard):',
+        'Arrow keys = Move | SHIFT = Block | , / . = Dodge',
+        'J = Jab | K = Hook | U = Uppercut | I = Body',
+      ] : [
+        'Jab, Hook, Uppercut, Body — punch to deal damage',
+        'Hold Block to reduce incoming damage',
+        'Dodge left/right to avoid punches',
+        'Mash buttons to get up from knockdowns!',
+        '',
+        'Keyboard: J/K = Jab | H = Hook | U = Upper | B = Body',
+        'SPACE = Block | Q/E = Dodge | A/D = Move',
+      ],
+    },
+    tennis: {
+      title: 'Tennis',
+      emoji: '🎾',
+      lines: is2P ? [
+        'Real-time 1v1 — split keyboard!',
+        'Real tennis scoring: 15-30-40, games, sets',
+        '',
+        'P1 (bottom): WASD = Move | SPACE = Swing | Click = Serve',
+        'P2 (top): Arrow keys = Move | ENTER = Swing/Serve',
+      ] : [
+        'Move with mouse or A/D/W/S keys',
+        'Click to serve and swing',
+        'Ball auto-hits when you are close enough',
+        'Press W while swinging for a lob shot',
+        'Real tennis scoring: 15-30-40, games, sets',
+      ],
+    },
+    golf: {
+      title: 'Golf',
+      emoji: '⛳',
+      lines: is2P ? [
+        'P1 plays each hole first, then P2 plays same hole',
+        'Same wind conditions for both players',
+        'Click 3 times: Power → Accuracy → Swing!',
+        'A/D = Aim | W/S = Change club',
+        'Lowest total score wins',
+      ] : [
+        'Click once to start the power meter',
+        'Click again to set power (green = good)',
+        'Click a third time to set accuracy (center = straight)',
+        'A/D = Aim direction | W/S = Change club',
+        'Club auto-selects based on distance to hole',
+      ],
+    },
+  };
+}
 
 // ═══════ MAIN WII SPORTS COMPONENT ═══════
 export default function WiiSports({ onBack }: Props) {
   const [sport, setSport] = useState<Sport>('menu');
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
+  const [gameMode, setGameMode] = useState<GameMode>('1p');
   const [arcadeGame, setArcadeGame] = useState<ArcadeGame | null>(null);
   const [pendingSport, setPendingSport] = useState<Sport | null>(null);
   const [showInstructions, setShowInstructions] = useState<string | null>(null);
+  const [showModeSelect, setShowModeSelect] = useState(false);
 
   const selectSport = (s: Sport) => {
     if (s === 'arcade') { setSport('arcade'); return; }
@@ -4198,31 +4380,76 @@ export default function WiiSports({ onBack }: Props) {
 
   const startGame = (diff: Difficulty) => {
     setDifficulty(diff);
+    setShowModeSelect(true);
+  };
+
+  const selectMode = (mode: GameMode) => {
+    setGameMode(mode);
+    setShowModeSelect(false);
     if (pendingSport) {
       setShowInstructions(pendingSport);
     }
   };
 
   const dismissInstructions = () => {
-    if (pendingSport) setSport(pendingSport);
-    setPendingSport(null);
+    if (pendingSport) {
+      setSport(pendingSport);
+      setPendingSport(null);
+    }
     setShowInstructions(null);
   };
 
-  const exitGame = () => { setSport('menu'); setDifficulty(null); setArcadeGame(null); setPendingSport(null); setShowInstructions(null); };
+  // Re-show instructions during gameplay
+  const showInstructionsAgain = () => {
+    if (sport !== 'menu' && sport !== 'arcade') {
+      setShowInstructions(sport);
+    }
+  };
 
-  // Instructions screen (shown after difficulty, before game starts)
-  if (showInstructions && GAME_INSTRUCTIONS[showInstructions]) {
-    const info = GAME_INSTRUCTIONS[showInstructions];
+  const exitGame = () => { setSport('menu'); setDifficulty(null); setGameMode('1p'); setArcadeGame(null); setPendingSport(null); setShowInstructions(null); setShowModeSelect(false); };
+
+  // Mode selection screen (shown after difficulty, before instructions)
+  if (showModeSelect && pendingSport) {
+    const sportInfo = sports.find(s => s.id === pendingSport);
+    return (
+      <div className="h-full w-full overflow-auto" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)' }}>
+        <div className="sticky top-0 z-10 backdrop-blur-md" style={{ background: 'rgba(59,130,246,0.85)', borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
+          <div className="flex items-center gap-3 p-4">
+            <button onClick={() => { setShowModeSelect(false); setDifficulty(null); }} className="flex items-center gap-1.5 text-white bg-white/20 hover:bg-white/30 rounded-full px-4 py-2 text-sm font-bold transition-colors">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <h1 className="text-white font-bold text-lg">Players</h1>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-4 p-8 pt-16">
+          <p className="text-white/80 text-sm mb-4">{sportInfo?.emoji} {sportInfo?.name}</p>
+          <button onClick={() => selectMode('1p')}
+            className="w-full max-w-xs px-6 py-5 bg-white/90 rounded-2xl font-bold text-gray-800 text-lg hover:scale-105 active:scale-95 transition-transform shadow-lg">
+            1 Player vs CPU
+          </button>
+          <button onClick={() => selectMode('2p')}
+            className="w-full max-w-xs px-6 py-5 bg-white/90 rounded-2xl font-bold text-gray-800 text-lg hover:scale-105 active:scale-95 transition-transform shadow-lg">
+            2 Players
+          </button>
+          <p className="text-white/40 text-xs mt-2">2P requires a keyboard</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Instructions screen (shown after mode select, before game starts)
+  const gameInstructions = getGameInstructions(gameMode);
+  if (showInstructions && gameInstructions[showInstructions]) {
+    const info = gameInstructions[showInstructions];
     const sportColor = sports.find(s => s.id === showInstructions)?.color || 'from-blue-500 to-blue-600';
     return (
       <div className="h-full w-full overflow-auto" style={{ background: 'linear-gradient(135deg, #1a1a2e, #16213e)' }}>
         <div className="sticky top-0 z-10 backdrop-blur-md" style={{ background: 'rgba(26,26,46,0.9)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           <div className="flex items-center gap-3 p-4">
-            <button onClick={() => { setShowInstructions(null); setPendingSport(null); setDifficulty(null); }} className="flex items-center gap-1.5 text-white bg-white/10 hover:bg-white/20 rounded-full px-4 py-2 text-sm font-bold transition-colors">
+            <button onClick={() => { setShowInstructions(null); if (pendingSport) { setPendingSport(null); setDifficulty(null); setShowModeSelect(false); } }} className="flex items-center gap-1.5 text-white bg-white/10 hover:bg-white/20 rounded-full px-4 py-2 text-sm font-bold transition-colors">
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
-            <h1 className="text-white font-bold text-lg">How to Play</h1>
+            <h1 className="text-white font-bold text-lg">How to Play{gameMode === '2p' ? ' (2P)' : ''}</h1>
           </div>
         </div>
         <div className="flex flex-col items-center gap-6 p-6 pt-10 max-w-md mx-auto">
@@ -4324,14 +4551,18 @@ export default function WiiSports({ onBack }: Props) {
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
             <h1 className="text-white font-bold text-lg">{currentSport?.emoji} {currentSport?.name}</h1>
-            <span className="text-white/40 text-xs capitalize ml-auto">{difficulty}</span>
+            <div className="ml-auto flex items-center gap-2">
+              {gameMode === '2p' && <span className="text-blue-300 text-xs font-bold">2P</span>}
+              <span className="text-white/40 text-xs capitalize">{difficulty}</span>
+              <button onClick={showInstructionsAgain} className="text-white/50 hover:text-white/80 text-sm transition-colors" title="How to Play">ℹ️</button>
+            </div>
           </div>
         </div>
-        {sport === 'baseball' && <Baseball difficulty={difficulty} onExit={exitGame} />}
-        {sport === 'basketball' && <Basketball difficulty={difficulty} onExit={exitGame} />}
-        {sport === 'boxing' && <Boxing difficulty={difficulty} onExit={exitGame} />}
-        {sport === 'tennis' && <Tennis difficulty={difficulty} onExit={exitGame} />}
-        {sport === 'golf' && <Golf difficulty={difficulty} onExit={exitGame} />}
+        {sport === 'baseball' && <Baseball difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
+        {sport === 'basketball' && <Basketball difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
+        {sport === 'boxing' && <Boxing difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
+        {sport === 'tennis' && <Tennis difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
+        {sport === 'golf' && <Golf difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
       </div>
     );
   }
