@@ -1889,228 +1889,1673 @@ function Boxing({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => 
   );
 }
 
-// ═══════ TENNIS (Canvas Pong) ═══════
+// ═══════ TENNIS (Wii Sports Style) ═══════
 function Tennis({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [scores, setScores] = useState({ player: 0, cpu: 0 });
-  const [gameOver, setGameOver] = useState(false);
-  const stateRef = useRef({ playerY: 200, ballX: 300, ballY: 200, ballDX: 3, ballDY: 2, cpuY: 200, mouseY: 200 });
+  const animRef = useRef<number>(0);
+  const [, forceUpdate] = useState(0);
 
-  const cpuSpeed = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 3.5 : 5;
+  const W = 600, H = 420;
+  const COURT_LEFT = 60, COURT_RIGHT = W - 60, COURT_TOP = 70, COURT_BOTTOM = H - 50;
+  const NET_Y = (COURT_TOP + COURT_BOTTOM) / 2;
+  const cpuSkill = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.6 : 0.85;
+
+  const stateRef = useRef<{
+    // Players
+    playerX: number; playerY: number; playerSwing: number; playerSwingType: string;
+    cpuX: number; cpuY: number; cpuSwing: number; cpuSwingType: string;
+    // Ball
+    ballX: number; ballY: number; ballZ: number; ballVX: number; ballVY: number; ballVZ: number;
+    ballSpin: number; ballActive: boolean; ballShadowX: number; ballShadowY: number;
+    // Scoring - proper tennis
+    playerPoints: number; cpuPoints: number;
+    playerGames: number; cpuGames: number;
+    playerSets: number; cpuSets: number;
+    // State
+    serving: boolean; server: 'player' | 'cpu'; serveSide: 'left' | 'right';
+    rally: number; lastHitter: 'player' | 'cpu' | null;
+    phase: 'playing' | 'point' | 'gameOver';
+    message: string; messageTimer: number;
+    bounced: boolean; bouncedInCourt: boolean;
+    // Input
+    mouseX: number; mouseY: number; keys: Set<string>;
+    // Match
+    matchOver: boolean; winner: string;
+    introTimer: number;
+    serveTimer: number;
+    pointDelay: number;
+  } | null>(null);
+
+  function pointName(pts: number): string {
+    return ['0', '15', '30', '40'][pts] || '40';
+  }
+
+  function scoreString(s: NonNullable<typeof stateRef.current>): string {
+    if (s.playerPoints >= 3 && s.cpuPoints >= 3) {
+      if (s.playerPoints === s.cpuPoints) return 'Deuce';
+      if (s.playerPoints > s.cpuPoints) return 'Ad - YOU';
+      return 'Ad - CPU';
+    }
+    return `${pointName(s.playerPoints)} - ${pointName(s.cpuPoints)}`;
+  }
+
+  function initState() {
+    stateRef.current = {
+      playerX: W / 2, playerY: COURT_BOTTOM - 30, playerSwing: 0, playerSwingType: 'fore',
+      cpuX: W / 2, cpuY: COURT_TOP + 30, cpuSwing: 0, cpuSwingType: 'fore',
+      ballX: W / 2, ballY: COURT_BOTTOM - 50, ballZ: 0, ballVX: 0, ballVY: 0, ballVZ: 0,
+      ballSpin: 0, ballActive: false, ballShadowX: W / 2, ballShadowY: COURT_BOTTOM - 50,
+      playerPoints: 0, cpuPoints: 0, playerGames: 0, cpuGames: 0, playerSets: 0, cpuSets: 0,
+      serving: true, server: 'player', serveSide: 'right',
+      rally: 0, lastHitter: null,
+      phase: 'playing', message: '', messageTimer: 0,
+      bounced: false, bouncedInCourt: false,
+      mouseX: W / 2, mouseY: COURT_BOTTOM - 30, keys: new Set(),
+      matchOver: false, winner: '',
+      introTimer: 120, serveTimer: 60, pointDelay: 0,
+    };
+  }
 
   useEffect(() => {
+    initState();
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const W = 600, H = 400;
-    canvas.width = W; canvas.height = H;
-    const s = stateRef.current;
-    let raf: number;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const handleMove = (e: MouseEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      stateRef.current?.keys.add(e.key.toLowerCase());
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      stateRef.current?.keys.delete(e.key.toLowerCase());
+    };
+    const handleMouse = (e: MouseEvent) => {
+      const s = stateRef.current; if (!s) return;
       const rect = canvas.getBoundingClientRect();
+      s.mouseX = ((e.clientX - rect.left) / rect.width) * W;
       s.mouseY = ((e.clientY - rect.top) / rect.height) * H;
     };
     const handleTouch = (e: TouchEvent) => {
+      const s = stateRef.current; if (!s) return;
       const rect = canvas.getBoundingClientRect();
+      s.mouseX = ((e.touches[0].clientX - rect.left) / rect.width) * W;
       s.mouseY = ((e.touches[0].clientY - rect.top) / rect.height) * H;
     };
-    canvas.addEventListener('mousemove', handleMove);
-    canvas.addEventListener('touchmove', handleTouch);
-
-    const loop = () => {
-      // Player paddle
-      s.playerY += (s.mouseY - s.playerY) * 0.15;
-      // CPU paddle
-      const cpuTarget = s.ballY + (Math.random() - 0.5) * 30;
-      if (s.cpuY < cpuTarget - 5) s.cpuY += cpuSpeed;
-      if (s.cpuY > cpuTarget + 5) s.cpuY -= cpuSpeed;
-      // Ball
-      s.ballX += s.ballDX; s.ballY += s.ballDY;
-      if (s.ballY <= 5 || s.ballY >= H - 5) s.ballDY *= -1;
-      // Player paddle hit
-      if (s.ballX <= 25 && s.ballX >= 15 && Math.abs(s.ballY - s.playerY) < 40) {
-        s.ballDX = Math.abs(s.ballDX) * 1.05;
-        s.ballDY += (s.ballY - s.playerY) * 0.1;
+    const handleClick = () => {
+      const s = stateRef.current; if (!s) return;
+      if (s.matchOver) { forceUpdate(n => n + 1); return; }
+      if (s.serving && s.server === 'player' && s.serveTimer <= 0) {
+        doServe(s, 'player');
+      } else if (s.ballActive && s.playerSwing <= 0) {
+        attemptSwing(s, 'player');
       }
-      // CPU paddle hit
-      if (s.ballX >= W - 25 && s.ballX <= W - 15 && Math.abs(s.ballY - s.cpuY) < 40) {
-        s.ballDX = -Math.abs(s.ballDX) * 1.05;
-        s.ballDY += (s.ballY - s.cpuY) * 0.1;
-      }
-      // Score
-      if (s.ballX < 0) {
-        setScores(p => {
-          const next = { ...p, cpu: p.cpu + 1 };
-          if (next.cpu >= 5) setGameOver(true);
-          return next;
-        });
-        s.ballX = W / 2; s.ballY = H / 2; s.ballDX = 3; s.ballDY = 2;
-      }
-      if (s.ballX > W) {
-        setScores(p => {
-          const next = { ...p, player: p.player + 1 };
-          if (next.player >= 5) setGameOver(true);
-          return next;
-        });
-        s.ballX = W / 2; s.ballY = H / 2; s.ballDX = -3; s.ballDY = -2;
-      }
-      // Clamp speed
-      s.ballDX = Math.max(-8, Math.min(8, s.ballDX));
-      s.ballDY = Math.max(-6, Math.min(6, s.ballDY));
-
-      // Draw
-      ctx.fillStyle = '#1a5c2a'; ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.setLineDash([8, 8]);
-      ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke(); ctx.setLineDash([]);
-      // Paddles
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(10, s.playerY - 35, 10, 70);
-      ctx.fillRect(W - 20, s.cpuY - 35, 10, 70);
-      // Ball
-      ctx.beginPath(); ctx.arc(s.ballX, s.ballY, 6, 0, Math.PI * 2); ctx.fill();
-
-      if (!gameOver) raf = requestAnimationFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('mousemove', handleMove); canvas.removeEventListener('touchmove', handleTouch); };
-  }, [gameOver, cpuSpeed]);
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    canvas.addEventListener('mousemove', handleMouse);
+    canvas.addEventListener('touchmove', handleTouch);
+    canvas.addEventListener('click', handleClick);
+
+    function doServe(s: NonNullable<typeof stateRef.current>, who: 'player' | 'cpu') {
+      s.serving = false;
+      s.ballActive = true;
+      s.bounced = false;
+      s.bouncedInCourt = false;
+      s.lastHitter = who;
+      s.rally = 0;
+
+      if (who === 'player') {
+        const targetX = s.serveSide === 'right' ? W * 0.35 + Math.random() * 60 : W * 0.45 + Math.random() * 60;
+        s.ballX = s.playerX;
+        s.ballY = s.playerY - 10;
+        s.ballZ = 30;
+        s.ballVX = (targetX - s.ballX) * 0.025;
+        s.ballVY = -4.5 - Math.random();
+        s.ballVZ = 3;
+        s.ballSpin = (Math.random() - 0.5) * 0.3;
+        s.playerSwing = 15;
+        s.playerSwingType = 'serve';
+      } else {
+        const targetX = s.serveSide === 'right' ? W * 0.45 + Math.random() * 60 : W * 0.35 + Math.random() * 60;
+        s.ballX = s.cpuX;
+        s.ballY = s.cpuY + 10;
+        s.ballZ = 30;
+        s.ballVX = (targetX - s.ballX) * 0.025;
+        s.ballVY = 4 + Math.random();
+        s.ballVZ = 3;
+        s.ballSpin = (Math.random() - 0.5) * 0.3;
+        s.cpuSwing = 15;
+        s.cpuSwingType = 'serve';
+      }
+    }
+
+    function attemptSwing(s: NonNullable<typeof stateRef.current>, who: 'player' | 'cpu') {
+      const px = who === 'player' ? s.playerX : s.cpuX;
+      const py = who === 'player' ? s.playerY : s.cpuY;
+      const dist = Math.sqrt((s.ballX - px) ** 2 + (s.ballY - py) ** 2);
+      const reachRange = who === 'player' ? 55 : 50;
+
+      if (dist > reachRange || s.ballZ > 40) return false;
+
+      const isBackhand = who === 'player' ? s.ballX < px : s.ballX > px;
+      const swingType = isBackhand ? 'back' : 'fore';
+
+      if (who === 'player') {
+        s.playerSwing = 18;
+        s.playerSwingType = swingType;
+        s.lastHitter = 'player';
+
+        // Aim toward CPU side
+        const aimX = s.cpuX + (Math.random() - 0.5) * 200;
+        const aimY = COURT_TOP + 20 + Math.random() * 60;
+        const dx = aimX - s.ballX;
+        const dy = aimY - s.ballY;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const speed = 4 + Math.random() * 2;
+        s.ballVX = (dx / d) * speed * 0.7;
+        s.ballVY = (dy / d) * speed;
+        s.ballVZ = 2.5 + Math.random() * 1.5;
+        s.ballSpin = (Math.random() - 0.5) * 0.5;
+
+        // Lob if holding up
+        if (s.keys.has('w') || s.keys.has('arrowup')) {
+          s.ballVZ = 5;
+          s.ballVY *= 0.8;
+        }
+      } else {
+        s.cpuSwing = 18;
+        s.cpuSwingType = swingType;
+        s.lastHitter = 'cpu';
+
+        const aimX = s.playerX + (Math.random() - 0.5) * 180 * cpuSkill;
+        const aimY = COURT_BOTTOM - 30 - Math.random() * 50;
+        const dx = aimX - s.ballX;
+        const dy = aimY - s.ballY;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const speed = 3.5 + Math.random() * 2 * cpuSkill;
+        s.ballVX = (dx / d) * speed * 0.7;
+        s.ballVY = (dy / d) * speed;
+        s.ballVZ = 2 + Math.random() * 2;
+        s.ballSpin = (Math.random() - 0.5) * 0.4;
+      }
+
+      s.bounced = false;
+      s.bouncedInCourt = false;
+      s.rally++;
+      return true;
+    }
+
+    function awardPoint(s: NonNullable<typeof stateRef.current>, to: 'player' | 'cpu', msg: string) {
+      s.phase = 'point';
+      s.message = msg;
+      s.messageTimer = 80;
+      s.ballActive = false;
+      s.pointDelay = 80;
+
+      if (to === 'player') s.playerPoints++;
+      else s.cpuPoints++;
+
+      // Check game win
+      const pp = s.playerPoints, cp = s.cpuPoints;
+      const gameWon = (pp >= 4 && pp - cp >= 2) ? 'player' : (cp >= 4 && cp - pp >= 2) ? 'cpu' : null;
+      if (gameWon) {
+        if (gameWon === 'player') s.playerGames++;
+        else s.cpuGames++;
+        s.playerPoints = 0;
+        s.cpuPoints = 0;
+        s.server = s.server === 'player' ? 'cpu' : 'player';
+        s.message = `Game - ${gameWon === 'player' ? 'YOU' : 'CPU'}!`;
+
+        // Check set win
+        const pg = s.playerGames, cg = s.cpuGames;
+        const setWon = (pg >= 6 && pg - cg >= 2) ? 'player' : (cg >= 6 && cg - pg >= 2) ? 'cpu' : null;
+        if (setWon) {
+          if (setWon === 'player') s.playerSets++;
+          else s.cpuSets++;
+          s.playerGames = 0;
+          s.cpuGames = 0;
+          s.message = `Set - ${setWon === 'player' ? 'YOU' : 'CPU'}!`;
+
+          // Check match
+          if (s.playerSets >= 2 || s.cpuSets >= 2) {
+            s.matchOver = true;
+            s.winner = s.playerSets >= 2 ? 'YOU WIN!' : 'CPU Wins!';
+            s.phase = 'gameOver';
+            s.message = s.winner;
+          }
+        }
+      }
+
+      s.serveSide = s.serveSide === 'right' ? 'left' : 'right';
+    }
+
+    function update() {
+      const s = stateRef.current;
+      if (!s || s.matchOver) return;
+
+      if (s.introTimer > 0) { s.introTimer--; return; }
+
+      // Message timer
+      if (s.messageTimer > 0) s.messageTimer--;
+
+      // Swing timers
+      if (s.playerSwing > 0) s.playerSwing--;
+      if (s.cpuSwing > 0) s.cpuSwing--;
+
+      // Point delay
+      if (s.phase === 'point') {
+        s.pointDelay--;
+        if (s.pointDelay <= 0) {
+          s.phase = 'playing';
+          s.serving = true;
+          s.serveTimer = 40;
+          s.ballActive = false;
+          if (s.server === 'player') {
+            s.ballX = s.serveSide === 'right' ? W * 0.6 : W * 0.4;
+            s.ballY = COURT_BOTTOM - 50;
+          } else {
+            s.ballX = s.serveSide === 'right' ? W * 0.4 : W * 0.6;
+            s.ballY = COURT_TOP + 50;
+          }
+          s.ballZ = 0; s.ballVX = 0; s.ballVY = 0; s.ballVZ = 0;
+        }
+        return;
+      }
+
+      // Serve timer
+      if (s.serveTimer > 0) s.serveTimer--;
+
+      // CPU serve
+      if (s.serving && s.server === 'cpu' && s.serveTimer <= 0) {
+        doServe(s, 'cpu');
+      }
+
+      // Player movement (keyboard + mouse hybrid)
+      const moveSpeed = 3.5;
+      if (s.keys.has('a') || s.keys.has('arrowleft')) s.playerX -= moveSpeed;
+      if (s.keys.has('d') || s.keys.has('arrowright')) s.playerX += moveSpeed;
+      if (s.keys.has('w') || s.keys.has('arrowup')) s.playerY -= moveSpeed * 0.7;
+      if (s.keys.has('s') || s.keys.has('arrowdown')) s.playerY += moveSpeed * 0.7;
+
+      // Mouse pull (gentle)
+      s.playerX += (s.mouseX - s.playerX) * 0.04;
+      s.playerY += (s.mouseY - s.playerY) * 0.02;
+
+      // Clamp player
+      s.playerX = Math.max(COURT_LEFT - 20, Math.min(COURT_RIGHT + 20, s.playerX));
+      s.playerY = Math.max(NET_Y + 20, Math.min(H - 15, s.playerY));
+
+      // Auto-swing for player when ball is close
+      if (s.ballActive && s.playerSwing <= 0 && !s.serving) {
+        const dist = Math.sqrt((s.ballX - s.playerX) ** 2 + (s.ballY - s.playerY) ** 2);
+        if (dist < 45 && s.ballY > NET_Y && s.ballZ < 30 && s.lastHitter !== 'player') {
+          if (s.keys.has(' ') || s.keys.has('j') || s.keys.has('k')) {
+            attemptSwing(s, 'player');
+          }
+        }
+      }
+
+      // CPU movement
+      if (s.ballActive && !s.serving) {
+        let targetX = s.ballX;
+        let targetY = s.ballY - 15;
+
+        if (s.lastHitter === 'cpu') {
+          // Return to center after hitting
+          targetX = W / 2;
+          targetY = COURT_TOP + 40;
+        }
+
+        const cpuMoveSpeed = 2 + cpuSkill * 2;
+        s.cpuX += (targetX - s.cpuX) * 0.05 * cpuMoveSpeed;
+        s.cpuY += (targetY - s.cpuY) * 0.03 * cpuMoveSpeed;
+      } else {
+        s.cpuX += (W / 2 - s.cpuX) * 0.03;
+        s.cpuY += ((COURT_TOP + 40) - s.cpuY) * 0.03;
+      }
+      s.cpuX = Math.max(COURT_LEFT - 20, Math.min(COURT_RIGHT + 20, s.cpuX));
+      s.cpuY = Math.max(15, Math.min(NET_Y - 20, s.cpuY));
+
+      // CPU swing
+      if (s.ballActive && s.cpuSwing <= 0 && s.lastHitter !== 'cpu') {
+        const dist = Math.sqrt((s.ballX - s.cpuX) ** 2 + (s.ballY - s.cpuY) ** 2);
+        if (dist < 50 && s.ballY < NET_Y && s.ballZ < 30) {
+          if (Math.random() < cpuSkill * 0.8 + 0.15) {
+            attemptSwing(s, 'cpu');
+          }
+        }
+      }
+
+      // Ball physics
+      if (s.ballActive) {
+        s.ballX += s.ballVX;
+        s.ballY += s.ballVY;
+        s.ballZ += s.ballVZ;
+        s.ballVZ -= 0.18; // gravity
+        s.ballVX += s.ballSpin * 0.02;
+
+        // Shadow follows ball X/Y
+        s.ballShadowX = s.ballX;
+        s.ballShadowY = s.ballY;
+
+        // Bounce
+        if (s.ballZ <= 0 && s.ballVZ < 0) {
+          s.ballZ = 0;
+
+          if (!s.bounced) {
+            s.bounced = true;
+            // Check if bounce is in court
+            const inCourt = s.ballX >= COURT_LEFT && s.ballX <= COURT_RIGHT &&
+              s.ballY >= COURT_TOP && s.ballY <= COURT_BOTTOM;
+            s.bouncedInCourt = inCourt;
+
+            if (!inCourt) {
+              // Out!
+              if (s.lastHitter === 'player') {
+                awardPoint(s, 'cpu', 'OUT!');
+              } else {
+                awardPoint(s, 'player', 'OUT!');
+              }
+              return;
+            }
+
+            s.ballVZ = Math.abs(s.ballVZ) * 0.55;
+            s.ballVX *= 0.8;
+            s.ballVY *= 0.8;
+          } else {
+            // Second bounce = point
+            if (s.ballY > NET_Y) {
+              // Bounced on player side twice
+              awardPoint(s, 'cpu', s.rally > 0 ? 'Double bounce!' : 'Ace!');
+            } else {
+              awardPoint(s, 'player', s.rally > 2 ? 'Winner!' : 'Point!');
+            }
+            return;
+          }
+        }
+
+        // Net collision
+        if (s.ballZ < 15) {
+          const prevY = s.ballY - s.ballVY;
+          if ((prevY < NET_Y && s.ballY >= NET_Y) || (prevY > NET_Y && s.ballY <= NET_Y)) {
+            if (s.ballZ < 12) {
+              // Hit net
+              s.ballVY *= -0.3;
+              s.ballVX *= 0.5;
+              s.ballVZ = 1;
+              s.message = 'Net!';
+              s.messageTimer = 30;
+              // Ball falls on hitter's side = point for other
+              if (Math.abs(s.ballVY) < 0.5) {
+                if (s.lastHitter === 'player') awardPoint(s, 'cpu', 'Net!');
+                else awardPoint(s, 'player', 'Net!');
+                return;
+              }
+            }
+          }
+        }
+
+        // Out of bounds (sides)
+        if (s.ballX < COURT_LEFT - 40 || s.ballX > COURT_RIGHT + 40 || s.ballY < COURT_TOP - 60 || s.ballY > COURT_BOTTOM + 60) {
+          if (s.lastHitter === 'player') awardPoint(s, 'cpu', 'Out!');
+          else awardPoint(s, 'player', 'Out!');
+        }
+      }
+    }
+
+    function drawCourt(ctx: CanvasRenderingContext2D) {
+      // Sky
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+      skyGrad.addColorStop(0, '#87ceeb');
+      skyGrad.addColorStop(0.4, '#a8d8ea');
+      skyGrad.addColorStop(1, '#5a9e6f');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Court surface
+      ctx.fillStyle = '#4a7c59';
+      ctx.fillRect(COURT_LEFT - 15, COURT_TOP - 15, COURT_RIGHT - COURT_LEFT + 30, COURT_BOTTOM - COURT_TOP + 30);
+
+      // Court lines
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      // Outer boundary
+      ctx.strokeRect(COURT_LEFT, COURT_TOP, COURT_RIGHT - COURT_LEFT, COURT_BOTTOM - COURT_TOP);
+      // Center service line
+      ctx.beginPath();
+      ctx.moveTo(COURT_LEFT, NET_Y);
+      ctx.lineTo(COURT_RIGHT, NET_Y);
+      ctx.stroke();
+      // Singles sidelines (inner)
+      const singleInset = 30;
+      ctx.strokeRect(COURT_LEFT + singleInset, COURT_TOP, COURT_RIGHT - COURT_LEFT - singleInset * 2, COURT_BOTTOM - COURT_TOP);
+      // Service boxes
+      const serviceTop = NET_Y - 80;
+      const serviceBottom = NET_Y + 80;
+      ctx.beginPath();
+      ctx.moveTo(COURT_LEFT + singleInset, serviceTop);
+      ctx.lineTo(COURT_RIGHT - singleInset, serviceTop);
+      ctx.moveTo(COURT_LEFT + singleInset, serviceBottom);
+      ctx.lineTo(COURT_RIGHT - singleInset, serviceBottom);
+      // Center T
+      ctx.moveTo(W / 2, serviceTop);
+      ctx.lineTo(W / 2, serviceBottom);
+      ctx.stroke();
+
+      // Net
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fillRect(COURT_LEFT - 20, NET_Y - 1, COURT_RIGHT - COURT_LEFT + 40, 3);
+      // Net posts
+      ctx.fillStyle = '#888';
+      ctx.fillRect(COURT_LEFT - 22, NET_Y - 8, 5, 16);
+      ctx.fillRect(COURT_RIGHT + 17, NET_Y - 8, 5, 16);
+      // Net mesh suggestion
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 0.5;
+      for (let x = COURT_LEFT - 15; x < COURT_RIGHT + 15; x += 8) {
+        ctx.beginPath();
+        ctx.moveTo(x, NET_Y - 6);
+        ctx.lineTo(x, NET_Y);
+        ctx.stroke();
+      }
+    }
+
+    function drawPlayer(ctx: CanvasRenderingContext2D, x: number, y: number, isPlayer: boolean, swing: number, swingType: string) {
+      ctx.save();
+      const skinColor = isPlayer ? '#f4c089' : '#8b6f47';
+      const shirtColor = isPlayer ? '#3b82f6' : '#ef4444';
+      const facing = isPlayer ? -1 : 1;
+      const scale = isPlayer ? 1.1 : 0.9; // perspective
+
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath();
+      ctx.ellipse(0, 15, 18, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Legs
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-8, 8, 6, 14);
+      ctx.fillRect(2, 8, 6, 14);
+      // Shoes
+      ctx.fillStyle = '#333';
+      ctx.fillRect(-10, 20, 9, 4);
+      ctx.fillRect(1, 20, 9, 4);
+
+      // Body
+      ctx.fillStyle = shirtColor;
+      ctx.fillRect(-11, -10, 22, 20);
+
+      // Head
+      ctx.fillStyle = skinColor;
+      ctx.beginPath();
+      ctx.arc(0, -20, 12, 0, Math.PI * 2);
+      ctx.fill();
+      // Hair
+      ctx.fillStyle = isPlayer ? '#4a3728' : '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(0, -24, 9, Math.PI, Math.PI * 2);
+      ctx.fill();
+      // Eyes
+      ctx.fillStyle = '#333';
+      ctx.fillRect(-5, -22, 3, 3);
+      ctx.fillRect(2, -22, 3, 3);
+
+      // Arm + racket
+      ctx.save();
+      const armX = 10;
+      const armY = -5;
+      ctx.translate(armX, armY);
+
+      if (swing > 0) {
+        const swingProgress = 1 - swing / 18;
+        const swingAngle = swingType === 'serve' ? -Math.PI * 0.8 + swingProgress * Math.PI * 1.2 :
+          swingType === 'back' ? Math.PI * 0.3 - swingProgress * Math.PI * 0.8 :
+          -Math.PI * 0.3 + swingProgress * Math.PI * 0.9;
+        ctx.rotate(swingAngle);
+      } else {
+        ctx.rotate(facing * -0.3);
+      }
+
+      // Arm
+      ctx.fillStyle = skinColor;
+      ctx.fillRect(-2, -2, 22, 5);
+
+      // Racket
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(20, -1, 10, 3);
+      // Racket head
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(35, 0, 10, 14, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(200,200,200,0.3)';
+      ctx.fill();
+      // Strings
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 0.5;
+      for (let i = -8; i <= 8; i += 4) {
+        ctx.beginPath(); ctx.moveTo(35 + i, -12); ctx.lineTo(35 + i, 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(27, i); ctx.lineTo(43, i); ctx.stroke();
+      }
+
+      ctx.restore();
+      ctx.restore();
+    }
+
+    function drawBall(ctx: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      if (!s.ballActive) return;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(s.ballShadowX, s.ballShadowY, 5 + s.ballZ * 0.05, 3 + s.ballZ * 0.02, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Ball (offset by Z)
+      const drawY = s.ballY - s.ballZ;
+      const size = 4 + s.ballZ * 0.03;
+      ctx.fillStyle = '#ccff00';
+      ctx.beginPath();
+      ctx.arc(s.ballX, drawY, size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#99cc00';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Fuzz line
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(s.ballX, drawY, size - 1.5, -0.5, 0.8);
+      ctx.stroke();
+    }
+
+    function drawHUD(ctx: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      // Scoreboard
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(W / 2 - 130, 2, 260, 55);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(W / 2 - 130, 2, 260, 55);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+
+      // Headers
+      ctx.fillStyle = '#aaa';
+      ctx.font = '9px sans-serif';
+      ctx.fillText('SETS', W / 2 - 45, 14);
+      ctx.fillText('GAMES', W / 2, 14);
+      ctx.fillText('POINTS', W / 2 + 55, 14);
+
+      // Player
+      ctx.fillStyle = '#3b82f6';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('YOU', W / 2 - 80, 32);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`${s.playerSets}`, W / 2 - 45, 34);
+      ctx.fillText(`${s.playerGames}`, W / 2, 34);
+      ctx.fillText(pointName(s.playerPoints), W / 2 + 55, 34);
+
+      // CPU
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('CPU', W / 2 - 80, 48);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`${s.cpuSets}`, W / 2 - 45, 50);
+      ctx.fillText(`${s.cpuGames}`, W / 2, 50);
+      ctx.fillText(pointName(s.cpuPoints), W / 2 + 55, 50);
+
+      // Deuce/Ad indicator
+      if (s.playerPoints >= 3 && s.cpuPoints >= 3) {
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillText(scoreString(s), W / 2, 68);
+      }
+
+      // Serving indicator
+      if (s.serving) {
+        const flash = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+        ctx.globalAlpha = flash;
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillText(s.server === 'player' ? 'CLICK TO SERVE' : 'CPU SERVING...', W / 2, H - 15);
+        ctx.globalAlpha = 1;
+      }
+
+      // Message
+      if (s.messageTimer > 0) {
+        const alpha = Math.min(1, s.messageTimer / 20);
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 32px sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 4;
+        ctx.textAlign = 'center';
+        ctx.strokeText(s.message, W / 2, H / 2);
+        ctx.fillText(s.message, W / 2, H / 2);
+        ctx.globalAlpha = 1;
+      }
+
+      // Rally counter
+      if (s.rally > 2 && s.ballActive) {
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Rally: ${s.rally}`, W - 15, H - 10);
+      }
+
+      // Match over overlay
+      if (s.matchOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.font = 'bold 36px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        ctx.textAlign = 'center';
+        ctx.fillText(s.winner, W / 2, H * 0.4);
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Sets: ${s.playerSets} - ${s.cpuSets}`, W / 2, H * 0.5);
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText('Click to continue', W / 2, H * 0.62);
+      }
+
+      // Intro
+      if (s.introTimer > 0) {
+        const alpha = Math.min(1, s.introTimer / 30);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(W * 0.1, H * 0.72, W * 0.8, H * 0.22);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('CONTROLS', W / 2, H * 0.78);
+        ctx.font = '11px sans-serif';
+        ctx.fillText('A/D or Mouse = Move | W/S = Forward/Back', W / 2, H * 0.84);
+        ctx.fillText('SPACE or J/K = Swing | Click = Serve & Swing', W / 2, H * 0.89);
+        ctx.fillText('W while swinging = Lob shot', W / 2, H * 0.94);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function render() {
+      const s = stateRef.current;
+      if (!s) return;
+      const c = canvasRef.current?.getContext('2d');
+      if (!c) return;
+      drawCourt(c);
+      // Draw back player first (CPU on top half)
+      drawPlayer(c, s.cpuX, s.cpuY, false, s.cpuSwing, s.cpuSwingType);
+      drawBall(c, s);
+      drawPlayer(c, s.playerX, s.playerY, true, s.playerSwing, s.playerSwingType);
+      drawHUD(c, s);
+    }
+
+    function gameLoop() {
+      update();
+      render();
+      animRef.current = requestAnimationFrame(gameLoop);
+    }
+    animRef.current = requestAnimationFrame(gameLoop);
+
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      canvas.removeEventListener('mousemove', handleMouse);
+      canvas.removeEventListener('touchmove', handleTouch);
+      canvas.removeEventListener('click', handleClick);
+    };
+  }, [cpuSkill]);
+
+  const doSwing = () => {
+    const s = stateRef.current;
+    if (!s) return;
+    if (s.matchOver) { onExit(); return; }
+    if (s.serving && s.server === 'player' && s.serveTimer <= 0) {
+      // Trigger serve via keys
+      s.keys.add(' ');
+      setTimeout(() => s.keys.delete(' '), 50);
+    } else {
+      s.keys.add(' ');
+      setTimeout(() => s.keys.delete(' '), 50);
+    }
+  };
+
+  const doMove = (dir: 'left' | 'right' | 'up' | 'down') => {
+    const s = stateRef.current;
+    if (!s) return;
+    const amt = 20;
+    if (dir === 'left') s.playerX -= amt;
+    if (dir === 'right') s.playerX += amt;
+    if (dir === 'up') s.playerY -= amt * 0.7;
+    if (dir === 'down') s.playerY += amt * 0.7;
+  };
 
   return (
-    <div className="flex flex-col items-center gap-4 p-4">
-      <div className="flex gap-8 text-white text-center">
-        <div><p className="text-xs opacity-60">YOU</p><p className="text-2xl font-black">{scores.player}</p></div>
-        <div><p className="text-xs opacity-60">CPU</p><p className="text-2xl font-black">{scores.cpu}</p></div>
-      </div>
-      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[3/2] bg-green-900 touch-none" />
-      <p className="text-white/60 text-xs">Move mouse or touch to control paddle • First to 5 wins</p>
-      {gameOver && (
-        <div className="space-y-2 text-center">
-          <p className="text-yellow-300 font-black text-xl">{scores.player >= 5 ? 'YOU WIN! 🏆' : 'CPU Wins!'}</p>
-          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30">Back to Sports</button>
+    <div className="flex flex-col items-center gap-2 p-2">
+      <canvas ref={canvasRef} width={W} height={H}
+        className="rounded-xl border-2 border-white/20 shadow-2xl w-full max-w-[600px] cursor-pointer touch-none"
+        tabIndex={0} />
+      <div className="w-full max-w-[600px] space-y-1.5">
+        <div className="flex gap-1.5 justify-center">
+          <button onPointerDown={() => doMove('left')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">← Move</button>
+          <button onPointerDown={() => doMove('up')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">↑ Fwd</button>
+          <button onPointerDown={doSwing} className="px-5 py-2 bg-green-500 text-white font-bold rounded-lg active:scale-90 text-sm shadow-lg">Swing / Serve</button>
+          <button onPointerDown={() => doMove('down')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">↓ Back</button>
+          <button onPointerDown={() => doMove('right')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Move →</button>
         </div>
-      )}
+        <div className="flex gap-1.5 justify-center">
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.keys.add('w'); setTimeout(() => stateRef.current?.keys.delete('w'), 200); doSwing(); }} className="px-4 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Lob Shot</button>
+        </div>
+      </div>
+      <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
     </div>
   );
 }
 
-// ═══════ GOLF ═══════
+// ═══════ GOLF (Wii Sports Style) ═══════
+interface GolfHole {
+  par: number; teeX: number; teeY: number; holeX: number; holeY: number;
+  fairway: { cx: number; cy: number; rx: number; ry: number; angle?: number }[];
+  bunkers: { cx: number; cy: number; r: number }[];
+  water: { cx: number; cy: number; rx: number; ry: number }[];
+  trees: { x: number; y: number; size: number }[];
+  name: string;
+}
+
 function Golf({ difficulty, onExit }: { difficulty: Difficulty; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [hole, setHole] = useState(1);
-  const [strokes, setStrokes] = useState(0);
-  const [totalStrokes, setTotalStrokes] = useState(0);
-  const [message, setMessage] = useState('Click and drag to aim & set power');
-  const [scored, setScored] = useState(false);
-  const maxHoles = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 5 : 9;
-  const stateRef = useRef({ ballX: 100, ballY: 350, holeX: 450, holeY: 80, dragging: false, dragX: 0, dragY: 0, moving: false, vx: 0, vy: 0 });
+  const animRef = useRef<number>(0);
+  const [, forceUpdate] = useState(0);
 
-  const resetHole = useCallback(() => {
-    const s = stateRef.current;
-    s.ballX = 80 + Math.random() * 60; s.ballY = 320 + Math.random() * 40;
-    s.holeX = 350 + Math.random() * 150; s.holeY = 50 + Math.random() * 100;
-    s.moving = false; s.vx = 0; s.vy = 0;
-    setStrokes(0); setScored(false); setMessage('Click and drag to aim & set power');
-  }, []);
+  const W = 600, H = 440;
+  const maxHoles = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 6 : 9;
 
-  useEffect(() => { resetHole(); }, [hole, resetHole]);
+  const HOLES: GolfHole[] = [
+    { name: 'The Opener', par: 3, teeX: 100, teeY: 380, holeX: 450, holeY: 100,
+      fairway: [{ cx: 275, cy: 240, rx: 180, ry: 170 }],
+      bunkers: [{ cx: 380, cy: 180, r: 25 }],
+      water: [], trees: [{ x: 500, y: 200, size: 20 }, { x: 520, y: 300, size: 15 }] },
+    { name: 'Dog Leg', par: 4, teeX: 80, teeY: 390, holeX: 520, holeY: 80,
+      fairway: [{ cx: 200, cy: 300, rx: 120, ry: 120 }, { cx: 400, cy: 150, rx: 140, ry: 100 }],
+      bunkers: [{ cx: 300, cy: 200, r: 30 }, { cx: 480, cy: 140, r: 20 }],
+      water: [{ cx: 350, cy: 300, rx: 50, ry: 30 }],
+      trees: [{ x: 250, y: 100, size: 22 }, { x: 150, y: 150, size: 18 }] },
+    { name: 'Island Green', par: 3, teeX: 120, teeY: 370, holeX: 460, holeY: 120,
+      fairway: [{ cx: 460, cy: 120, rx: 55, ry: 55 }],
+      bunkers: [{ cx: 420, cy: 80, r: 15 }],
+      water: [{ cx: 350, cy: 200, rx: 140, ry: 120 }],
+      trees: [{ x: 530, y: 100, size: 16 }] },
+    { name: 'The Long One', par: 5, teeX: 60, teeY: 400, holeX: 540, holeY: 60,
+      fairway: [{ cx: 180, cy: 330, rx: 120, ry: 90 }, { cx: 350, cy: 200, rx: 100, ry: 80 }, { cx: 500, cy: 100, rx: 70, ry: 60 }],
+      bunkers: [{ cx: 250, cy: 260, r: 22 }, { cx: 450, cy: 130, r: 25 }, { cx: 520, cy: 90, r: 15 }],
+      water: [{ cx: 400, cy: 300, rx: 40, ry: 25 }],
+      trees: [{ x: 300, y: 100, size: 20 }, { x: 100, y: 200, size: 18 }, { x: 480, y: 200, size: 15 }] },
+    { name: 'Short & Sweet', par: 3, teeX: 300, teeY: 390, holeX: 300, holeY: 80,
+      fairway: [{ cx: 300, cy: 235, rx: 80, ry: 170 }],
+      bunkers: [{ cx: 240, cy: 120, r: 25 }, { cx: 360, cy: 120, r: 25 }],
+      water: [], trees: [{ x: 180, y: 200, size: 20 }, { x: 420, y: 200, size: 20 }] },
+    { name: 'Trap Alley', par: 4, teeX: 80, teeY: 220, holeX: 530, holeY: 220,
+      fairway: [{ cx: 300, cy: 220, rx: 250, ry: 70 }],
+      bunkers: [{ cx: 180, cy: 170, r: 20 }, { cx: 280, cy: 270, r: 22 }, { cx: 400, cy: 170, r: 25 }, { cx: 460, cy: 260, r: 18 }],
+      water: [], trees: [{ x: 200, y: 100, size: 15 }, { x: 350, y: 320, size: 18 }, { x: 500, y: 120, size: 16 }] },
+    { name: 'Lakeside', par: 4, teeX: 100, teeY: 380, holeX: 500, holeY: 100,
+      fairway: [{ cx: 200, cy: 280, rx: 100, ry: 110 }, { cx: 420, cy: 140, rx: 110, ry: 80 }],
+      bunkers: [{ cx: 470, cy: 160, r: 20 }],
+      water: [{ cx: 310, cy: 200, rx: 70, ry: 50 }],
+      trees: [{ x: 50, y: 250, size: 20 }, { x: 550, y: 200, size: 18 }] },
+    { name: 'The Gauntlet', par: 4, teeX: 80, teeY: 380, holeX: 520, holeY: 60,
+      fairway: [{ cx: 160, cy: 300, rx: 80, ry: 100 }, { cx: 350, cy: 180, rx: 90, ry: 70 }, { cx: 490, cy: 90, rx: 60, ry: 50 }],
+      bunkers: [{ cx: 240, cy: 230, r: 25 }, { cx: 420, cy: 120, r: 20 }],
+      water: [{ cx: 300, cy: 320, rx: 40, ry: 30 }, { cx: 450, cy: 200, rx: 35, ry: 25 }],
+      trees: [{ x: 180, y: 150, size: 18 }, { x: 400, y: 250, size: 16 }, { x: 530, y: 150, size: 14 }] },
+    { name: 'Championship', par: 5, teeX: 60, teeY: 220, holeX: 550, holeY: 220,
+      fairway: [{ cx: 150, cy: 220, rx: 90, ry: 70 }, { cx: 300, cy: 150, rx: 80, ry: 60 }, { cx: 430, cy: 280, rx: 80, ry: 60 }, { cx: 530, cy: 220, rx: 50, ry: 45 }],
+      bunkers: [{ cx: 220, cy: 280, r: 22 }, { cx: 370, cy: 100, r: 20 }, { cx: 500, cy: 180, r: 18 }],
+      water: [{ cx: 350, cy: 250, rx: 45, ry: 35 }],
+      trees: [{ x: 250, y: 120, size: 20 }, { x: 400, y: 350, size: 18 }, { x: 500, y: 100, size: 16 }] },
+  ];
+
+  type Club = 'driver' | 'iron' | 'wedge' | 'putter';
+  const CLUBS: { id: Club; name: string; power: number; loft: number }[] = [
+    { id: 'driver', name: 'Driver', power: 12, loft: 0.6 },
+    { id: 'iron', name: '5 Iron', power: 8, loft: 0.8 },
+    { id: 'wedge', name: 'Wedge', power: 5, loft: 1.2 },
+    { id: 'putter', name: 'Putter', power: 3, loft: 0 },
+  ];
+
+  const stateRef = useRef<{
+    holeIndex: number; strokes: number; scorecard: number[];
+    ballX: number; ballY: number; ballZ: number;
+    ballVX: number; ballVY: number; ballVZ: number;
+    ballMoving: boolean; ballInHole: boolean;
+    club: number; // index in CLUBS
+    aimAngle: number; // radians, direction to aim
+    powerPhase: 'aim' | 'charging' | 'swinging' | 'flying' | 'done' | 'intro';
+    powerLevel: number; powerDir: number; // oscillating power meter
+    swingAccuracy: number; accuracyDir: number; // accuracy meter
+    windSpeed: number; windAngle: number;
+    message: string; messageTimer: number;
+    ballTrail: { x: number; y: number; z: number }[];
+    lastBallX: number; lastBallY: number; // for water/OB reset
+    terrain: string; // where ball is sitting
+    matchOver: boolean;
+    introTimer: number;
+    landingAnim: number;
+  } | null>(null);
+
+  function getScoreName(strokes: number, par: number): string {
+    const diff = strokes - par;
+    if (strokes === 1) return 'HOLE IN ONE!';
+    if (diff <= -3) return 'Albatross!';
+    if (diff === -2) return 'Eagle!';
+    if (diff === -1) return 'Birdie!';
+    if (diff === 0) return 'Par';
+    if (diff === 1) return 'Bogey';
+    if (diff === 2) return 'Double Bogey';
+    return `+${diff}`;
+  }
+
+  function isOnFairway(x: number, y: number, hole: GolfHole): boolean {
+    for (const fw of hole.fairway) {
+      const dx = x - fw.cx;
+      const dy = y - fw.cy;
+      if ((dx * dx) / (fw.rx * fw.rx) + (dy * dy) / (fw.ry * fw.ry) <= 1) return true;
+    }
+    return false;
+  }
+
+  function isInBunker(x: number, y: number, hole: GolfHole): boolean {
+    for (const b of hole.bunkers) {
+      if (Math.sqrt((x - b.cx) ** 2 + (y - b.cy) ** 2) <= b.r) return true;
+    }
+    return false;
+  }
+
+  function isInWater(x: number, y: number, hole: GolfHole): boolean {
+    for (const w of hole.water) {
+      const dx = x - w.cx;
+      const dy = y - w.cy;
+      if ((dx * dx) / (w.rx * w.rx) + (dy * dy) / (w.ry * w.ry) <= 1) return true;
+    }
+    return false;
+  }
+
+  function hitsTree(x: number, y: number, hole: GolfHole): boolean {
+    for (const t of hole.trees) {
+      if (Math.sqrt((x - t.x) ** 2 + (y - t.y) ** 2) <= t.size) return true;
+    }
+    return false;
+  }
+
+  function initHole(holeIdx: number) {
+    const hole = HOLES[holeIdx];
+    stateRef.current = {
+      holeIndex: holeIdx,
+      strokes: 0,
+      scorecard: stateRef.current?.scorecard || [],
+      ballX: hole.teeX, ballY: hole.teeY, ballZ: 0,
+      ballVX: 0, ballVY: 0, ballVZ: 0,
+      ballMoving: false, ballInHole: false,
+      club: 0, aimAngle: Math.atan2(hole.holeY - hole.teeY, hole.holeX - hole.teeX),
+      powerPhase: 'intro', powerLevel: 0, powerDir: 1,
+      swingAccuracy: 50, accuracyDir: 1,
+      windSpeed: 0.5 + Math.random() * 2.5, windAngle: Math.random() * Math.PI * 2,
+      message: hole.name, messageTimer: 90,
+      ballTrail: [], lastBallX: hole.teeX, lastBallY: hole.teeY,
+      terrain: 'tee', matchOver: false,
+      introTimer: 60, landingAnim: 0,
+    };
+  }
 
   useEffect(() => {
+    initHole(0);
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const W = 550, H = 400;
-    canvas.width = W; canvas.height = H;
-    const s = stateRef.current;
-    let raf: number;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const getPos = (e: MouseEvent | Touch) => {
-      const rect = canvas.getBoundingClientRect();
-      return { x: ((e.clientX - rect.left) / rect.width) * W, y: ((e.clientY - rect.top) / rect.height) * H };
-    };
+    const handleKey = (e: KeyboardEvent) => {
+      const s = stateRef.current;
+      if (!s) return;
 
-    const onDown = (e: MouseEvent) => {
-      if (s.moving) return;
-      const p = getPos(e); s.dragging = true; s.dragX = p.x; s.dragY = p.y;
-    };
-    const onMove = (e: MouseEvent) => { if (s.dragging) { const p = getPos(e); s.dragX = p.x; s.dragY = p.y; } };
-    const onUp = () => {
-      if (!s.dragging) return;
-      s.dragging = false;
-      const dx = s.ballX - s.dragX, dy = s.ballY - s.dragY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 10) return;
-      const power = Math.min(dist / 25, 10);
-      s.vx = (dx / dist) * power; s.vy = (dy / dist) * power;
-      s.moving = true;
-      setStrokes(st => st + 1);
-      setMessage('');
-    };
-    canvas.addEventListener('mousedown', onDown);
-    canvas.addEventListener('mousemove', onMove);
-    canvas.addEventListener('mouseup', onUp);
-
-    const loop = () => {
-      if (s.moving) {
-        s.ballX += s.vx; s.ballY += s.vy;
-        s.vx *= 0.985; s.vy *= 0.985;
-        if (s.ballX < 5 || s.ballX > W - 5) s.vx *= -0.7;
-        if (s.ballY < 5 || s.ballY > H - 5) s.vy *= -0.7;
-        s.ballX = Math.max(5, Math.min(W - 5, s.ballX));
-        s.ballY = Math.max(5, Math.min(H - 5, s.ballY));
-        // Check hole
-        const dist = Math.sqrt((s.ballX - s.holeX) ** 2 + (s.ballY - s.holeY) ** 2);
-        if (dist < 15) { s.moving = false; setScored(true); setMessage(strokes === 0 ? 'HOLE IN ONE! 🏆' : 'In the hole! ⛳'); }
-        if (Math.abs(s.vx) < 0.1 && Math.abs(s.vy) < 0.1) { s.moving = false; if (!scored) setMessage('Click and drag to aim'); }
+      if (s.matchOver && e.key === 'Enter') { forceUpdate(n => n + 1); return; }
+      if (s.ballInHole && e.key === 'Enter') {
+        nextHole();
+        return;
       }
 
-      // Draw
-      ctx.fillStyle = '#2d7a3a'; ctx.fillRect(0, 0, W, H);
+      if (s.powerPhase === 'aim') {
+        if (e.key === 'ArrowLeft' || e.key === 'a') s.aimAngle -= 0.05;
+        if (e.key === 'ArrowRight' || e.key === 'd') s.aimAngle += 0.05;
+        if (e.key === 'ArrowUp' || e.key === 'w') s.club = Math.max(0, s.club - 1);
+        if (e.key === 'ArrowDown' || e.key === 's') s.club = Math.min(CLUBS.length - 1, s.club + 1);
+        if (e.key === ' ' || e.key === 'Enter') {
+          s.powerPhase = 'charging';
+          s.powerLevel = 0;
+          s.powerDir = 1;
+        }
+      } else if (s.powerPhase === 'charging') {
+        if (e.key === ' ' || e.key === 'Enter') {
+          s.powerPhase = 'swinging';
+          s.swingAccuracy = 50;
+          s.accuracyDir = 2;
+        }
+      } else if (s.powerPhase === 'swinging') {
+        if (e.key === ' ' || e.key === 'Enter') {
+          doSwing();
+        }
+      }
+    };
+
+    const handleClick = () => {
+      const s = stateRef.current;
+      if (!s) return;
+      if (s.matchOver) { forceUpdate(n => n + 1); return; }
+      if (s.ballInHole) { nextHole(); return; }
+      if (s.powerPhase === 'aim') {
+        s.powerPhase = 'charging'; s.powerLevel = 0; s.powerDir = 1;
+      } else if (s.powerPhase === 'charging') {
+        s.powerPhase = 'swinging'; s.swingAccuracy = 50; s.accuracyDir = 2;
+      } else if (s.powerPhase === 'swinging') {
+        doSwing();
+      }
+    };
+
+    function nextHole() {
+      const s = stateRef.current;
+      if (!s) return;
+      s.scorecard.push(s.strokes);
+      if (s.holeIndex + 1 >= maxHoles) {
+        s.matchOver = true;
+        s.message = 'Course Complete!';
+        s.messageTimer = 200;
+        return;
+      }
+      initHole(s.holeIndex + 1);
+    }
+
+    function doSwing() {
+      const s = stateRef.current;
+      if (!s) return;
+      const club = CLUBS[s.club];
+      const powerPct = s.powerLevel / 100;
+      const accuracyOff = (s.swingAccuracy - 50) / 50; // -1 to 1
+
+      const baseSpeed = club.power * powerPct;
+      const angleOffset = accuracyOff * 0.25; // off-center = slice/hook
+      const angle = s.aimAngle + angleOffset;
+
+      s.ballVX = Math.cos(angle) * baseSpeed;
+      s.ballVY = Math.sin(angle) * baseSpeed;
+      s.ballVZ = baseSpeed * club.loft;
+      s.ballMoving = true;
+      s.powerPhase = 'flying';
+      s.strokes++;
+      s.lastBallX = s.ballX;
+      s.lastBallY = s.ballY;
+      s.ballTrail = [];
+      s.message = '';
+      s.landingAnim = 0;
+
+      // Bunker penalty
+      if (s.terrain === 'bunker') {
+        s.ballVX *= 0.6;
+        s.ballVY *= 0.6;
+        s.ballVZ *= 0.7;
+      }
+    }
+
+    window.addEventListener('keydown', handleKey);
+    canvas.addEventListener('click', handleClick);
+
+    function update() {
+      const s = stateRef.current;
+      if (!s || s.matchOver) return;
+
+      if (s.introTimer > 0) { s.introTimer--; if (s.introTimer <= 0) s.powerPhase = 'aim'; return; }
+      if (s.messageTimer > 0) s.messageTimer--;
+      if (s.landingAnim > 0) s.landingAnim--;
+
+      // Power meter oscillation
+      if (s.powerPhase === 'charging') {
+        s.powerLevel += s.powerDir * 1.5;
+        if (s.powerLevel >= 100) { s.powerLevel = 100; s.powerDir = -1; }
+        if (s.powerLevel <= 0) { s.powerLevel = 0; s.powerDir = 1; }
+      }
+
+      // Accuracy meter oscillation
+      if (s.powerPhase === 'swinging') {
+        s.swingAccuracy += s.accuracyDir * 2;
+        if (s.swingAccuracy >= 100) { s.swingAccuracy = 100; s.accuracyDir = -2; }
+        if (s.swingAccuracy <= 0) { s.swingAccuracy = 0; s.accuracyDir = 2; }
+      }
+
+      // Ball physics
+      if (s.ballMoving) {
+        // Wind
+        s.ballVX += Math.cos(s.windAngle) * s.windSpeed * 0.003;
+        s.ballVY += Math.sin(s.windAngle) * s.windSpeed * 0.003;
+
+        s.ballX += s.ballVX;
+        s.ballY += s.ballVY;
+        s.ballZ += s.ballVZ;
+        s.ballVZ -= 0.12; // gravity
+
+        // Trail
+        s.ballTrail.push({ x: s.ballX, y: s.ballY, z: s.ballZ });
+        if (s.ballTrail.length > 60) s.ballTrail.shift();
+
+        const hole = HOLES[s.holeIndex];
+
+        // Tree collision (only when ball is low)
+        if (s.ballZ < 30 && s.ballZ > 0 && hitsTree(s.ballX, s.ballY, hole)) {
+          s.ballVX *= -0.4;
+          s.ballVY *= -0.4;
+          s.ballVZ = Math.abs(s.ballVZ) * 0.3;
+          s.message = 'Hit a tree!';
+          s.messageTimer = 40;
+        }
+
+        // Landing
+        if (s.ballZ <= 0 && s.ballVZ < 0) {
+          s.ballZ = 0;
+
+          // Check water
+          if (isInWater(s.ballX, s.ballY, hole)) {
+            s.ballX = s.lastBallX;
+            s.ballY = s.lastBallY;
+            s.ballMoving = false;
+            s.strokes++; // penalty stroke
+            s.message = 'Water! +1 penalty';
+            s.messageTimer = 60;
+            s.powerPhase = 'aim';
+            s.terrain = 'fairway';
+            return;
+          }
+
+          // Check OB
+          if (s.ballX < 10 || s.ballX > W - 10 || s.ballY < 10 || s.ballY > H - 10) {
+            s.ballX = s.lastBallX;
+            s.ballY = s.lastBallY;
+            s.ballMoving = false;
+            s.strokes++;
+            s.message = 'Out of bounds! +1 penalty';
+            s.messageTimer = 60;
+            s.powerPhase = 'aim';
+            s.terrain = 'rough';
+            return;
+          }
+
+          // Check hole
+          const distToHole = Math.sqrt((s.ballX - hole.holeX) ** 2 + (s.ballY - hole.holeY) ** 2);
+          const speed = Math.sqrt(s.ballVX ** 2 + s.ballVY ** 2);
+          if (distToHole < 12 && speed < 4) {
+            s.ballMoving = false;
+            s.ballInHole = true;
+            s.ballX = hole.holeX;
+            s.ballY = hole.holeY;
+            s.message = getScoreName(s.strokes, hole.par);
+            s.messageTimer = 120;
+            s.powerPhase = 'done';
+            return;
+          }
+
+          // Determine terrain
+          if (isInBunker(s.ballX, s.ballY, hole)) {
+            s.terrain = 'bunker';
+            s.ballVX *= 0.3;
+            s.ballVY *= 0.3;
+          } else if (isOnFairway(s.ballX, s.ballY, hole)) {
+            s.terrain = 'fairway';
+            s.ballVX *= 0.85;
+            s.ballVY *= 0.85;
+          } else {
+            s.terrain = 'rough';
+            s.ballVX *= 0.7;
+            s.ballVY *= 0.7;
+          }
+
+          // Bounce
+          if (Math.abs(s.ballVX) > 0.3 || Math.abs(s.ballVY) > 0.3) {
+            s.ballVZ = Math.abs(s.ballVZ) * 0.3;
+            s.landingAnim = 15;
+          } else {
+            // Ball stopped
+            s.ballMoving = false;
+            s.powerPhase = 'aim';
+            s.ballTrail = [];
+            s.lastBallX = s.ballX;
+            s.lastBallY = s.ballY;
+
+            // Auto-select club based on distance
+            const distH = Math.sqrt((s.ballX - hole.holeX) ** 2 + (s.ballY - hole.holeY) ** 2);
+            if (distH < 40) s.club = 3; // putter
+            else if (distH < 120) s.club = 2; // wedge
+            else if (distH < 250) s.club = 1; // iron
+            else s.club = 0; // driver
+
+            // Re-aim toward hole
+            s.aimAngle = Math.atan2(hole.holeY - s.ballY, hole.holeX - s.ballX);
+
+            if (s.terrain === 'bunker') { s.message = 'In a bunker'; s.messageTimer = 40; }
+            else if (s.terrain === 'rough') { s.message = 'In the rough'; s.messageTimer = 40; }
+          }
+        }
+      }
+    }
+
+    function drawHole(ctx: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      const hole = HOLES[s.holeIndex];
+
+      // Background (rough)
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+      bgGrad.addColorStop(0, '#2d6b1e');
+      bgGrad.addColorStop(1, '#1d5a12');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Rough texture
+      ctx.fillStyle = 'rgba(0,0,0,0.05)';
+      for (let i = 0; i < 200; i++) {
+        const rx = (i * 73 + 17) % W;
+        const ry = (i * 47 + 31) % H;
+        ctx.fillRect(rx, ry, 2, 2);
+      }
+
+      // Water hazards
+      for (const w of hole.water) {
+        ctx.fillStyle = '#2980b9';
+        ctx.beginPath();
+        ctx.ellipse(w.cx, w.cy, w.rx, w.ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Water shine
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        ctx.ellipse(w.cx - w.rx * 0.2, w.cy - w.ry * 0.2, w.rx * 0.4, w.ry * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       // Fairway
-      ctx.fillStyle = '#3a9e4f'; ctx.beginPath(); ctx.ellipse(W / 2, H / 2, 220, 160, 0, 0, Math.PI * 2); ctx.fill();
+      for (const fw of hole.fairway) {
+        ctx.fillStyle = '#4ade80';
+        ctx.beginPath();
+        ctx.ellipse(fw.cx, fw.cy, fw.rx, fw.ry, fw.angle || 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Stripe pattern
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        for (let i = -fw.ry; i < fw.ry; i += 12) {
+          ctx.fillRect(fw.cx - fw.rx, fw.cy + i, fw.rx * 2, 5);
+        }
+      }
+
+      // Green (around hole)
+      ctx.fillStyle = '#6ee7b7';
+      ctx.beginPath();
+      ctx.ellipse(hole.holeX, hole.holeY, 35, 30, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bunkers
+      for (const b of hole.bunkers) {
+        ctx.fillStyle = '#f4d794';
+        ctx.beginPath();
+        ctx.arc(b.cx, b.cy, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        // Edge shadow
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Sand texture
+        ctx.fillStyle = 'rgba(200,170,100,0.3)';
+        for (let i = 0; i < 8; i++) {
+          const sx = b.cx + (Math.cos(i * 0.8) * b.r * 0.5);
+          const sy = b.cy + (Math.sin(i * 0.8) * b.r * 0.5);
+          ctx.fillRect(sx, sy, 1, 1);
+        }
+      }
+
+      // Trees
+      for (const t of hole.trees) {
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.ellipse(t.x + 5, t.y + 5, t.size * 0.6, t.size * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Trunk
+        ctx.fillStyle = '#5C4033';
+        ctx.fillRect(t.x - 3, t.y - t.size * 0.3, 6, t.size * 0.6);
+        // Canopy
+        ctx.fillStyle = '#15803d';
+        ctx.beginPath();
+        ctx.arc(t.x, t.y - t.size * 0.4, t.size * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#166534';
+        ctx.beginPath();
+        ctx.arc(t.x - 3, t.y - t.size * 0.5, t.size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       // Hole
-      ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.arc(s.holeX, s.holeY, 12, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ff4444'; ctx.fillRect(s.holeX - 1, s.holeY - 30, 2, 30);
-      ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.moveTo(s.holeX + 1, s.holeY - 30); ctx.lineTo(s.holeX + 15, s.holeY - 25); ctx.lineTo(s.holeX + 1, s.holeY - 20); ctx.fill();
-      // Ball
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.ballX, s.ballY, 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(s.ballX, s.ballY, 5, 0, Math.PI * 2); ctx.stroke();
-      // Aim line
-      if (s.dragging) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-        ctx.beginPath(); ctx.moveTo(s.ballX, s.ballY); ctx.lineTo(s.ballX + (s.ballX - s.dragX), s.ballY + (s.ballY - s.dragY)); ctx.stroke();
+      ctx.fillStyle = '#111';
+      ctx.beginPath();
+      ctx.arc(hole.holeX, hole.holeY, 8, 0, Math.PI * 2);
+      ctx.fill();
+      // Flag pole
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hole.holeX, hole.holeY);
+      ctx.lineTo(hole.holeX, hole.holeY - 40);
+      ctx.stroke();
+      // Flag
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(hole.holeX, hole.holeY - 40);
+      ctx.lineTo(hole.holeX + 18, hole.holeY - 34);
+      ctx.lineTo(hole.holeX, hole.holeY - 28);
+      ctx.fill();
+
+      // Tee marker (if on first shot)
+      if (s.strokes === 0) {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(hole.teeX - 8, hole.teeY, 3, 0, Math.PI * 2);
+        ctx.arc(hole.teeX + 8, hole.teeY, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawBall(ctx: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      if (s.ballInHole) return;
+
+      // Trail
+      if (s.ballTrail.length > 1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(s.ballTrail[0].x, s.ballTrail[0].y - s.ballTrail[0].z);
+        for (let i = 1; i < s.ballTrail.length; i++) {
+          ctx.lineTo(s.ballTrail[i].x, s.ballTrail[i].y - s.ballTrail[i].z);
+        }
+        ctx.stroke();
         ctx.setLineDash([]);
       }
 
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('mousedown', onDown); canvas.removeEventListener('mousemove', onMove); canvas.removeEventListener('mouseup', onUp); };
-  }, [hole, scored, strokes]);
+      // Ball shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(s.ballX, s.ballY, 4 + s.ballZ * 0.02, 2 + s.ballZ * 0.01, 0, 0, Math.PI * 2);
+      ctx.fill();
 
-  const nextHole = () => {
-    setTotalStrokes(t => t + strokes);
-    if (hole >= maxHoles) { setMessage(`Game Over! Total: ${totalStrokes + strokes} strokes`); return; }
-    setHole(h => h + 1);
+      // Ball
+      const drawY = s.ballY - s.ballZ;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(s.ballX, drawY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+
+      // Landing splash
+      if (s.landingAnim > 0) {
+        const r = (15 - s.landingAnim) * 2;
+        ctx.strokeStyle = `rgba(255,255,255,${s.landingAnim / 15 * 0.5})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(s.ballX, s.ballY, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Aim line (when aiming)
+      if (s.powerPhase === 'aim' || s.powerPhase === 'charging' || s.powerPhase === 'swinging') {
+        const club = CLUBS[s.club];
+        const aimLen = 30 + club.power * 8;
+        const endX = s.ballX + Math.cos(s.aimAngle) * aimLen;
+        const endY = s.ballY + Math.sin(s.aimAngle) * aimLen;
+
+        ctx.strokeStyle = 'rgba(255,255,100,0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(s.ballX, s.ballY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Arrow head
+        const arrowAngle = s.aimAngle;
+        ctx.fillStyle = 'rgba(255,255,100,0.6)';
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - 8 * Math.cos(arrowAngle - 0.4), endY - 8 * Math.sin(arrowAngle - 0.4));
+        ctx.lineTo(endX - 8 * Math.cos(arrowAngle + 0.4), endY - 8 * Math.sin(arrowAngle + 0.4));
+        ctx.fill();
+      }
+    }
+
+    function drawHUD(ctx: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      const hole = HOLES[s.holeIndex];
+
+      // Top bar
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, W, 40);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Hole ${s.holeIndex + 1}/${maxHoles}`, 10, 16);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(hole.name, 10, 32);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(`Par ${hole.par}`, W * 0.3, 16);
+      ctx.fillText(`Stroke ${s.strokes}`, W * 0.3, 32);
+
+      // Wind indicator
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Wind', W * 0.55, 14);
+      const windEndX = W * 0.55 + Math.cos(s.windAngle) * s.windSpeed * 8;
+      const windEndY = 28 + Math.sin(s.windAngle) * s.windSpeed * 8;
+      ctx.strokeStyle = '#87ceeb';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(W * 0.55, 28);
+      ctx.lineTo(windEndX, windEndY);
+      ctx.stroke();
+      ctx.fillStyle = '#87ceeb';
+      ctx.beginPath();
+      ctx.arc(windEndX, windEndY, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = '9px sans-serif';
+      ctx.fillText(`${s.windSpeed.toFixed(1)} mph`, W * 0.55, 38);
+
+      // Club
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(CLUBS[s.club].name, W * 0.78, 16);
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px sans-serif';
+      ctx.fillText('W/S to change', W * 0.78, 30);
+
+      // Terrain
+      ctx.textAlign = 'right';
+      ctx.fillStyle = s.terrain === 'bunker' ? '#f4d794' : s.terrain === 'rough' ? '#9ca3af' : '#4ade80';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(s.terrain.toUpperCase(), W - 10, 16);
+
+      // Total score
+      const totalOver = s.scorecard.reduce((sum, sc, i) => sum + (sc - HOLES[i].par), 0);
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Total: ${totalOver >= 0 ? '+' : ''}${totalOver}`, W - 10, 32);
+
+      // Power meter
+      if (s.powerPhase === 'charging' || s.powerPhase === 'swinging') {
+        const meterX = W - 45;
+        const meterY = 55;
+        const meterH = 200;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(meterX - 5, meterY - 5, 35, meterH + 10);
+
+        // Power bar background
+        ctx.fillStyle = '#333';
+        ctx.fillRect(meterX, meterY, 10, meterH);
+
+        // Power fill
+        const pct = s.powerLevel / 100;
+        const fillH = meterH * pct;
+        const grad = ctx.createLinearGradient(0, meterY + meterH, 0, meterY);
+        grad.addColorStop(0, '#22c55e');
+        grad.addColorStop(0.6, '#eab308');
+        grad.addColorStop(1, '#ef4444');
+        ctx.fillStyle = grad;
+        ctx.fillRect(meterX, meterY + meterH - fillH, 10, fillH);
+
+        // Power indicator
+        const indY = meterY + meterH - fillH;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(meterX + 12, indY);
+        ctx.lineTo(meterX + 22, indY - 4);
+        ctx.lineTo(meterX + 22, indY + 4);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${Math.round(s.powerLevel)}%`, meterX + 12, meterY + meterH + 15);
+        ctx.fillText('POWER', meterX - 3, meterY - 10);
+      }
+
+      // Accuracy meter
+      if (s.powerPhase === 'swinging') {
+        const meterX = W - 85;
+        const meterY = 55;
+        const meterH = 200;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(meterX - 5, meterY - 5, 30, meterH + 10);
+
+        ctx.fillStyle = '#333';
+        ctx.fillRect(meterX, meterY, 10, meterH);
+
+        // Sweet spot zone
+        const sweetSpotY = meterY + meterH * 0.45;
+        const sweetSpotH = meterH * 0.1;
+        ctx.fillStyle = 'rgba(34,197,94,0.4)';
+        ctx.fillRect(meterX, sweetSpotY, 10, sweetSpotH);
+
+        // Accuracy indicator
+        const accPct = s.swingAccuracy / 100;
+        const accY = meterY + meterH * (1 - accPct);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(meterX + 12, accY);
+        ctx.lineTo(meterX + 20, accY - 3);
+        ctx.lineTo(meterX + 20, accY + 3);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('ACCURACY', meterX - 5, meterY - 10);
+      }
+
+      // Phase instructions
+      if (s.powerPhase === 'aim') {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(W * 0.2, H - 30, W * 0.6, 25);
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('A/D = Aim | W/S = Club | SPACE/Click = Start Swing', W / 2, H - 13);
+      } else if (s.powerPhase === 'charging') {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(W * 0.3, H - 30, W * 0.4, 25);
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SPACE/Click to set POWER!', W / 2, H - 13);
+      } else if (s.powerPhase === 'swinging') {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(W * 0.3, H - 30, W * 0.4, 25);
+        ctx.fillStyle = '#3b82f6';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SPACE/Click for ACCURACY!', W / 2, H - 13);
+      }
+
+      // Message
+      if (s.messageTimer > 0) {
+        const alpha = Math.min(1, s.messageTimer / 20);
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 4;
+        ctx.textAlign = 'center';
+        ctx.strokeText(s.message, W / 2, H * 0.45);
+        ctx.fillText(s.message, W / 2, H * 0.45);
+        ctx.globalAlpha = 1;
+      }
+
+      // Ball in hole - next hole prompt
+      if (s.ballInHole) {
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(W * 0.25, H * 0.55, W * 0.5, 30);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(s.holeIndex + 1 < maxHoles ? 'Click / ENTER for next hole' : 'Click / ENTER for results', W / 2, H * 0.55 + 20);
+      }
+
+      // Match over - scorecard
+      if (s.matchOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        ctx.textAlign = 'center';
+        ctx.fillText('SCORECARD', W / 2, 50);
+
+        const totalStrokes = s.scorecard.reduce((a, b) => a + b, 0);
+        const totalPar = HOLES.slice(0, maxHoles).reduce((a, h) => a + h.par, 0);
+        const overUnder = totalStrokes - totalPar;
+
+        // Table
+        const startY = 80;
+        const rowH = 24;
+        ctx.font = 'bold 12px sans-serif';
+
+        // Header
+        ctx.fillStyle = '#aaa';
+        ctx.textAlign = 'center';
+        for (let i = 0; i < maxHoles; i++) {
+          ctx.fillText(`${i + 1}`, 80 + i * 50, startY);
+        }
+        ctx.fillText('TOT', 80 + maxHoles * 50, startY);
+
+        // Par row
+        ctx.fillStyle = '#888';
+        ctx.textAlign = 'left';
+        ctx.fillText('Par', 15, startY + rowH);
+        ctx.textAlign = 'center';
+        for (let i = 0; i < maxHoles; i++) {
+          ctx.fillText(`${HOLES[i].par}`, 80 + i * 50, startY + rowH);
+        }
+        ctx.fillText(`${totalPar}`, 80 + maxHoles * 50, startY + rowH);
+
+        // Score row
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'left';
+        ctx.fillText('You', 15, startY + rowH * 2);
+        ctx.textAlign = 'center';
+        for (let i = 0; i < s.scorecard.length; i++) {
+          const diff = s.scorecard[i] - HOLES[i].par;
+          ctx.fillStyle = diff < 0 ? '#22c55e' : diff === 0 ? '#fff' : diff === 1 ? '#eab308' : '#ef4444';
+          ctx.fillText(`${s.scorecard[i]}`, 80 + i * 50, startY + rowH * 2);
+        }
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`${totalStrokes}`, 80 + maxHoles * 50, startY + rowH * 2);
+
+        // Final score
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillStyle = overUnder < 0 ? '#22c55e' : overUnder === 0 ? '#fbbf24' : '#ef4444';
+        ctx.fillText(overUnder === 0 ? 'Even Par!' : `${overUnder > 0 ? '+' : ''}${overUnder} (${totalStrokes} strokes)`, W / 2, startY + rowH * 4);
+
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText('Click to continue', W / 2, startY + rowH * 5 + 10);
+      }
+    }
+
+    function render() {
+      const s = stateRef.current;
+      if (!s) return;
+      const c = canvasRef.current?.getContext('2d');
+      if (!c) return;
+      drawHole(c, s);
+      drawBall(c, s);
+      drawHUD(c, s);
+    }
+
+    function gameLoop() {
+      update();
+      render();
+      animRef.current = requestAnimationFrame(gameLoop);
+    }
+    animRef.current = requestAnimationFrame(gameLoop);
+
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      window.removeEventListener('keydown', handleKey);
+      canvas.removeEventListener('click', handleClick);
+    };
+  }, [maxHoles]);
+
+  // Mobile controls
+  const btnClass = "px-3 py-2 font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg";
+
+  const doAim = (dir: -1 | 1) => {
+    const s = stateRef.current;
+    if (s && s.powerPhase === 'aim') s.aimAngle += dir * 0.08;
+  };
+
+  const doClub = (dir: -1 | 1) => {
+    const s = stateRef.current;
+    if (s) s.club = Math.max(0, Math.min(CLUBS.length - 1, s.club + dir));
+  };
+
+  const doAction = () => {
+    const s = stateRef.current;
+    if (!s) return;
+    if (s.matchOver) { onExit(); return; }
+    if (s.ballInHole) {
+      // Trigger next hole by simulating enter key
+      const evt = new KeyboardEvent('keydown', { key: 'Enter' });
+      window.dispatchEvent(evt);
+      return;
+    }
+    canvasRef.current?.click();
   };
 
   return (
-    <div className="flex flex-col items-center gap-4 p-4">
-      <div className="flex gap-6 text-white text-center">
-        <div><p className="text-xs opacity-60">HOLE</p><p className="text-2xl font-black">{hole}/{maxHoles}</p></div>
-        <div><p className="text-xs opacity-60">STROKES</p><p className="text-2xl font-black">{strokes}</p></div>
-        <div><p className="text-xs opacity-60">TOTAL</p><p className="text-2xl font-black">{totalStrokes}</p></div>
+    <div className="flex flex-col items-center gap-2 p-2">
+      <canvas ref={canvasRef} width={W} height={H}
+        className="rounded-xl border-2 border-white/20 shadow-2xl w-full max-w-[600px] cursor-pointer touch-none"
+        tabIndex={0} />
+      <div className="w-full max-w-[600px] space-y-1.5">
+        <div className="flex gap-1.5 justify-center flex-wrap">
+          <button onPointerDown={() => doAim(-1)} className={`${btnClass} bg-gray-500 text-white`}>Aim ←</button>
+          <button onPointerDown={() => doAim(1)} className={`${btnClass} bg-gray-500 text-white`}>Aim →</button>
+          <button onPointerDown={doAction} className={`${btnClass} bg-green-500 text-white px-5 text-sm`}>Swing / Next</button>
+          <button onPointerDown={() => doClub(-1)} className={`${btnClass} bg-yellow-600 text-white`}>Club ↑</button>
+          <button onPointerDown={() => doClub(1)} className={`${btnClass} bg-yellow-600 text-white`}>Club ↓</button>
+        </div>
       </div>
-      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[550px] aspect-[550/400] bg-green-800 touch-none cursor-crosshair" />
-      <p className="text-white font-bold min-h-[1.5rem]">{message}</p>
-      {scored && (
-        hole < maxHoles
-          ? <button onClick={nextHole} className="px-6 py-2 bg-white text-emerald-700 font-bold rounded-xl hover:scale-105 active:scale-95 transition-transform shadow-lg">Next Hole →</button>
-          : <div className="space-y-2 text-center">
-              <p className="text-yellow-300 font-black text-xl">Course Complete! Total: {totalStrokes + strokes} 🏌️</p>
-              <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30">Back to Sports</button>
-            </div>
-      )}
+      <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
     </div>
   );
 }
