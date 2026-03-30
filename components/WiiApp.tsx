@@ -173,15 +173,15 @@ export default function WiiApp() {
             ))}
           </div>
 
-          {/* Mobile: all 8 — grid stretches to fill available space */}
-          <div className="md:hidden grid grid-cols-2 grid-rows-4 gap-1.5 w-full flex-1">
+          {/* Mobile: all 8 — use calc to fit between top and bottom bar */}
+          <div className="md:hidden grid grid-cols-2 grid-rows-4 gap-1 w-full" style={{ height: 'calc(100dvh - 90px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))' }}>
             {channelTiles.map((tile, i) => (
               <motion.button
                 key={tile.id}
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.03 + i * 0.03, duration: 0.25 }}
-                className="channel-tile flex flex-col items-center justify-center gap-0.5 min-h-0"
+                className="channel-tile flex flex-col items-center justify-center gap-0.5 overflow-hidden"
                 style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
                 onClick={() => setOpenChannel(tile.id)}
               >
