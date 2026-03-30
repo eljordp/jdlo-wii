@@ -1,5 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
 
 export const metadata: Metadata = {
   title: "JDLO — Systems Operator & Digital Growth",
@@ -11,7 +17,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "JDLO — Systems Operator",
     description: "I build systems that turn attention into action.",
-    url: "https://jdlo.site",
+    url: "https://jdlo.online",
     siteName: "JDLO",
     images: [{ url: "/jordan.jpg", width: 1200, height: 1500, alt: "Jordan Lopez — JDLO" }],
     type: "website",

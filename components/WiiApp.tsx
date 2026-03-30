@@ -120,13 +120,14 @@ export default function WiiApp() {
               jdlo.online
             </a>
 
-            {/* Press Ⓐ */}
+            {/* Press Ⓐ / Tap */}
             <div className="flex items-center gap-3" style={{ animation: 'pulse-opacity 1.5s ease-in-out infinite' }}>
-              <span className="text-white text-lg md:text-xl font-black tracking-wide">Press</span>
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full border-2 border-white flex items-center justify-center">
+              <span className="text-white text-lg md:text-xl font-black tracking-wide md:hidden">Tap to continue.</span>
+              <span className="text-white text-lg md:text-xl font-black tracking-wide hidden md:inline">Press</span>
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full border-2 border-white hidden md:flex items-center justify-center">
                 <span className="text-white font-black text-base md:text-lg">A</span>
               </div>
-              <span className="text-white text-lg md:text-xl font-black tracking-wide">to continue.</span>
+              <span className="text-white text-lg md:text-xl font-black tracking-wide hidden md:inline">to continue.</span>
             </div>
           </motion.div>
         )}
@@ -136,7 +137,7 @@ export default function WiiApp() {
       <div className="h-full w-full flex flex-col" style={{ background: theme.bg }}>
 
         {/* Channel Grid */}
-        <div className="flex-1 flex items-center justify-center px-4 md:px-16 pb-20 md:pb-28 pt-4 md:pt-6">
+        <div className="flex-1 flex items-center justify-center px-4 md:px-16 pt-4 md:pt-6" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 w-full max-w-[1100px]">
             {channelTiles.map((tile, i) => (
               <motion.button
@@ -175,11 +176,13 @@ export default function WiiApp() {
 
         {/* ═══════ BOTTOM BAR ═══════ */}
         <div
-          className="fixed bottom-0 left-0 right-0 h-[72px] md:h-[96px] rounded-t-[28px] flex items-center justify-between px-5 md:px-10 z-40"
+          className="fixed bottom-0 left-0 right-0 rounded-t-[28px] flex items-center justify-between px-5 md:px-10 z-40"
           style={{
             background: theme.barBg,
             borderTop: '1px solid rgba(255,255,255,0.4)',
             boxShadow: '0 -1px 12px rgba(0,0,0,0.06)',
+            minHeight: '72px',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           }}
         >
           {/* Wii Button */}

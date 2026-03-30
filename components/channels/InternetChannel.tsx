@@ -52,9 +52,9 @@ export default function InternetChannel({ onBack }: Props) {
       </div>
 
       {/* Search + Filters */}
-      <div className="px-4 md:px-6 pb-2 flex items-center gap-2">
+      <div className="px-4 md:px-6 pb-2 flex flex-col gap-2">
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg flex-1 max-w-xs"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg w-full"
           style={{ background: '#e4ecf2', border: '2px solid rgba(255,255,255,0.85)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}
         >
           <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
@@ -62,17 +62,17 @@ export default function InternetChannel({ onBack }: Props) {
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search..."
+            placeholder="Search FAQs..."
             className="flex-1 bg-transparent outline-none text-gray-700 text-sm placeholder:text-gray-400 min-w-0"
           />
           {query && <button onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600 text-[10px] font-bold">Clear</button>}
         </div>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {cats.map(c => (
             <button
               key={c}
               onClick={() => setCat(c)}
-              className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+              className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
                 cat === c ? 'bg-white text-gray-700 shadow-sm' : 'bg-white/40 text-gray-500 hover:bg-white/60'
               }`}
             >

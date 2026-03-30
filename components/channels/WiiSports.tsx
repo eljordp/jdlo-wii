@@ -48,6 +48,7 @@ const PITCH_INFO: Record<PitchType, { speed: number; move: number; name: string;
 function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState({ player: 0, cpu: 0, inning: 1, outs: 0, strikes: 0, balls: 0, batting: true, gameOver: false, message: 'Tap to swing!' });
+  const [gameKey, setGameKey] = useState(0);
 
   const maxInnings = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 5 : 9;
   const sweetSpot = difficulty === 'easy' ? 0.18 : difficulty === 'medium' ? 0.12 : 0.04;
@@ -55,7 +56,7 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
   const cpuContact = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.5 : 0.85;
 
   const gRef = useRef({
-    phase: 'idle' as 'idle' | 'pitch' | 'hit_fly' | 'result' | 'foul_fly',
+    phase: 'idle' as 'idle' | 'pitch' | 'hit_fly' | 'result' | 'foul_fly' | 'pitchSelect',
     timer: 60, ballZ: 0, ballTargetX: 0,
     swingAnim: 0, pitchAnim: 0,
     hitBallT: 0, hitDestX: 0, hitDestY: 0,
@@ -75,6 +76,11 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
     streak: 0, // consecutive hits
     lastHitQuality: '',
     shakeTimer: 0, shakeIntensity: 0,
+    pitchLabelTimer: 0,
+    // Pitching controls
+    pitchAimOscillate: 0,
+    selectedPitch: 'fastball' as PitchType,
+    mouseX: 300, // mouse position for pitch aiming
   });
 
   useEffect(() => {
@@ -91,17 +97,25 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
       setHud({ player: g.playerScore, cpu: g.cpuScore, inning: g.inning, outs: g.outs, strikes: g.strikes, balls: g.balls, batting: g.batting, gameOver: g.gameOver, message: msg });
     };
 
-    const startPitch = () => {
+    const startPitch = (playerPitching?: boolean) => {
       g.phase = 'pitch'; g.ballZ = 0; g.swingAnim = 0; g.pitchAnim = 1;
-      g.ballTargetX = W / 2 + (Math.random() - 0.5) * 70;
       g.clicked = false; g.cpuDecided = false;
       g.cpuSwingZ = 0.62 + Math.random() * 0.25;
       g.timingIndicator = 0;
       g.pitchCurveOffset = 0;
-      // Pick pitch type based on difficulty
-      const pitchTypes: PitchType[] = ['fastball', 'curve', 'changeup'];
-      const hardPitches: PitchType[] = ['curve', 'changeup', 'curve', 'changeup', 'fastball'];
-      g.pitchType = difficulty === 'easy' ? 'fastball' : difficulty === 'hard' ? hardPitches[Math.floor(Math.random() * hardPitches.length)] : pitchTypes[Math.floor(Math.random() * pitchTypes.length)];
+
+      if (playerPitching) {
+        // Player is pitching — use their selected type and mouse aim
+        g.pitchType = g.selectedPitch;
+        g.ballTargetX = g.mouseX; // aim from mouse/touch position
+      } else {
+        // CPU pitching — pick type and aim based on difficulty
+        g.ballTargetX = W / 2 + (Math.random() - 0.5) * 70;
+        const pitchTypes: PitchType[] = ['fastball', 'curve', 'changeup'];
+        const hardPitches: PitchType[] = ['curve', 'changeup', 'curve', 'changeup', 'fastball'];
+        g.pitchType = difficulty === 'easy' ? 'fastball' : difficulty === 'hard' ? hardPitches[Math.floor(Math.random() * hardPitches.length)] : pitchTypes[Math.floor(Math.random() * pitchTypes.length)];
+      }
+      g.pitchLabelTimer = 70;
     };
 
     const spawnParticles = (x: number, y: number, count: number, color: string) => {
@@ -256,21 +270,51 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
     };
 
     const onClick = () => { g.clicked = true; };
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      g.mouseX = ((e.clientX - rect.left) / rect.width) * W;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      g.mouseX = ((e.touches[0].clientX - rect.left) / rect.width) * W;
+    };
     canvas.addEventListener('click', onClick);
     canvas.addEventListener('touchstart', onClick, { passive: true });
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('touchmove', onTouchMove, { passive: true });
 
     // Init
     g.phase = 'idle'; g.timer = 40;
     g.strikes = 0; g.balls = 0; g.outs = 0; g.inning = 1;
     g.playerScore = 0; g.cpuScore = 0; g.batting = true; g.gameOver = false;
     g.bases = [false, false, false]; g.activeFielder = -1;
+    g.particles = []; g.pitchLabelTimer = 0; g.streak = 0; g.crowdExcitement = 0;
     syncHud('Step up to the plate!');
 
     const loop = () => {
       // ── UPDATE ──
       if (g.phase === 'idle') {
         g.timer--;
-        if (g.timer <= 0 && !g.gameOver) startPitch();
+        if (g.timer <= 0 && !g.gameOver) {
+          if (g.batting || gameMode === '2p') {
+            startPitch(); // CPU pitches to player
+          } else {
+            g.phase = 'pitchSelect'; // Player's turn to pitch
+            g.pitchAimOscillate = 0;
+            syncHud('Pick your pitch!');
+          }
+        }
+      } else if (g.phase === 'pitchSelect') {
+        // Oscillate aim target (for mobile fallback if no mouse)
+        g.pitchAimOscillate += 0.04;
+        // Mouse aim is tracked via mousemove — clamp to strike zone area
+        g.mouseX = Math.max(W / 2 - 50, Math.min(W / 2 + 50, g.mouseX));
+        // Keyboard pitch selection
+        if (g.clicked) {
+          g.clicked = false;
+          // Click = throw with current selection and aim
+          startPitch(true);
+        }
       } else if (g.phase === 'foul_fly') {
         g.foulBallX += g.foulBallVX;
         g.foulBallY += g.foulBallVY;
@@ -334,6 +378,7 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
       }
       g.swingAnim = Math.max(0, g.swingAnim - 0.05);
       if (g.shakeTimer > 0) g.shakeTimer--;
+      if (g.pitchLabelTimer > 0) g.pitchLabelTimer--;
       g.crowdExcitement = Math.max(0, g.crowdExcitement - 0.005);
 
       // Update particles
@@ -483,11 +528,37 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
       ctx.stroke(); ctx.lineCap = 'butt';
 
       // Strike zone
-      if ((g.batting || gameMode === '2p') && (g.phase === 'idle' || g.phase === 'pitch')) {
+      if (g.phase === 'idle' || g.phase === 'pitch' || g.phase === 'pitchSelect') {
         ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
         ctx.strokeRect(W / 2 - 30, H * 0.66, 60, H * 0.1);
         ctx.setLineDash([]);
+      }
+
+      // Pitch aiming crosshair (when player is pitching)
+      if (g.phase === 'pitchSelect') {
+        const aimX = Math.max(W / 2 - 50, Math.min(W / 2 + 50, g.mouseX));
+        const aimY = H * 0.71;
+        const pulse = 0.5 + 0.3 * Math.sin(Date.now() / 150);
+        const pc = PITCH_INFO[g.selectedPitch].color;
+        ctx.strokeStyle = pc;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = pulse;
+        ctx.beginPath(); ctx.arc(aimX, aimY, 10, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(aimX - 15, aimY); ctx.lineTo(aimX + 15, aimY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(aimX, aimY - 15); ctx.lineTo(aimX, aimY + 15); ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Label
+        ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = pc;
+        ctx.fillText(PITCH_INFO[g.selectedPitch].name, aimX, aimY - 18);
+        // Prompt
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 14px system-ui, sans-serif';
+        const flashA = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+        ctx.globalAlpha = flashA;
+        ctx.fillText('TAP TO THROW!', W / 2, H - 15);
+        ctx.globalAlpha = 1;
       }
 
       // Ball during pitch
@@ -517,7 +588,18 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
         ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, -0.5, 0.5); ctx.stroke();
         ctx.beginPath(); ctx.arc(bsx, bsy, br * 0.7, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
-        // (pitch type visual via trail color only - no label clutter)
+        // Pitch type label (fades in then out)
+        if (g.pitchLabelTimer > 0) {
+          const alpha = Math.min(1, g.pitchLabelTimer / 20);
+          const pi2 = PITCH_INFO[g.pitchType];
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = 'rgba(0,0,0,0.65)';
+          ctx.beginPath(); ctx.roundRect(W / 2 - 60, H * 0.5 - 17, 120, 30, 7); ctx.fill();
+          ctx.font = 'bold 14px system-ui, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillStyle = pi2.color;
+          ctx.fillText(pi2.name, W / 2, H * 0.5 + 6);
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Foul ball flight
@@ -568,7 +650,12 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
       }
       ctx.globalAlpha = 1;
 
-      // (streak tracked internally for gameplay but not displayed)
+      // Streak counter
+      if (g.streak >= 2 && g.batting) {
+        ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = g.streak >= 5 ? '#ef4444' : '#fbbf24';
+        ctx.fillText(`${g.streak} hit streak!`, 10, H - 8);
+      }
 
       // ── SCOREBOARD HUD ──
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -633,24 +720,58 @@ function Baseball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; ga
       if (!g.gameOver) raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
-  }, [difficulty, gameMode, maxInnings, sweetSpot, pitchSpd, cpuContact]);
+    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); canvas.removeEventListener('mousemove', onMouseMove); canvas.removeEventListener('touchmove', onTouchMove); };
+  }, [difficulty, gameMode, maxInnings, sweetSpot, pitchSpd, cpuContact, gameKey]);
 
   return (
     <div className="flex flex-col items-center gap-2 p-2">
       <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
       <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
-      <div className="flex gap-2 justify-center">
-        <button
-          onPointerDown={() => { gRef.current.clicked = true; }}
-          className="px-8 py-3 bg-white text-red-600 font-bold rounded-xl hover:scale-105 active:scale-90 transition-transform shadow-lg text-sm"
-        >SWING!</button>
-      </div>
-      <p className="text-white/50 text-xs">{hud.batting ? (gameMode === '2p' ? 'P1: Tap to swing!' : 'Tap to swing!') : (gameMode === '2p' ? 'P2: Tap to swing!' : 'CPU at bat...')}</p>
+      {hud.batting ? (
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex gap-2 justify-center">
+            <button onPointerDown={() => { gRef.current.clicked = true; }}
+              className="px-8 py-3 bg-white text-red-600 font-bold rounded-xl hover:scale-105 active:scale-90 transition-transform shadow-lg text-sm">SWING!</button>
+          </div>
+          <p className="text-white/50 text-xs">{gameMode === '2p' ? 'P1: Tap to swing!' : 'Tap to swing!'}</p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex gap-1.5 justify-center">
+            <button onPointerDown={() => { gRef.current.selectedPitch = 'fastball'; gRef.current.clicked = true; }}
+              className="px-4 py-2.5 bg-red-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">⚡ Fast</button>
+            <button onPointerDown={() => { gRef.current.selectedPitch = 'curve'; gRef.current.clicked = true; }}
+              className="px-4 py-2.5 bg-blue-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">🌀 Curve</button>
+            <button onPointerDown={() => { gRef.current.selectedPitch = 'changeup'; gRef.current.clicked = true; }}
+              className="px-4 py-2.5 bg-green-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">🐢 Change</button>
+          </div>
+          <p className="text-white/50 text-xs">Aim with mouse/touch, tap pitch to throw!</p>
+        </div>
+      )}
       {hud.gameOver && (
-        <div className="space-y-2 text-center">
-          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? (gameMode === '2p' ? 'P1 WINS!' : 'YOU WIN!') : hud.player < hud.cpu ? (gameMode === '2p' ? 'P2 WINS!' : 'CPU Wins!') : 'TIE!'}</p>
-          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
+        <div className="bg-black/40 rounded-2xl p-4 text-center space-y-3 w-full max-w-[600px]">
+          <p className="text-white/50 text-[10px] uppercase tracking-widest font-bold">Final Score</p>
+          <div className="flex items-center justify-center gap-8">
+            <div className="text-center">
+              <p className="text-white/50 text-xs font-bold mb-0.5">{gameMode === '2p' ? 'P1' : 'YOU'}</p>
+              <p className="text-white font-black text-4xl">{hud.player}</p>
+            </div>
+            <p className="text-white/30 text-2xl font-bold">—</p>
+            <div className="text-center">
+              <p className="text-white/50 text-xs font-bold mb-0.5">{gameMode === '2p' ? 'P2' : 'CPU'}</p>
+              <p className="text-white font-black text-4xl">{hud.cpu}</p>
+            </div>
+          </div>
+          <p className="text-yellow-300 font-black text-xl">
+            {hud.player > hud.cpu ? (gameMode === '2p' ? 'P1 WINS!' : 'YOU WIN!') : hud.player < hud.cpu ? (gameMode === '2p' ? 'P2 WINS!' : 'CPU WINS') : 'TIE GAME!'}
+          </p>
+          <div className="flex gap-2 justify-center">
+            <button
+              onClick={() => setGameKey(k => k + 1)}
+              className="px-6 py-2 bg-yellow-400 text-black rounded-xl font-bold hover:bg-yellow-300 active:scale-95 transition-all"
+            >Play Again</button>
+            <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 active:scale-95 transition-all">Back</button>
+          </div>
         </div>
       )}
     </div>
@@ -675,30 +796,30 @@ const SHOT_SPOTS = [
 function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState({ player: 0, cpu: 0, time: 45, playerTurn: true, gameOver: false, message: 'Click to shoot!' });
+  const [gameKey, setGameKey] = useState(0);
 
   const threshold = difficulty === 'easy' ? 28 : difficulty === 'medium' ? 18 : 5;
   const cpuMake = difficulty === 'easy' ? 0.3 : difficulty === 'medium' ? 0.5 : 0.88;
   const gameTime = difficulty === 'easy' ? 50 : difficulty === 'medium' ? 40 : 24;
 
   const gRef = useRef({
-    phase: 'idle' as 'idle' | 'aiming' | 'release' | 'flying' | 'result' | 'moving' | 'dunk',
+    phase: 'idle' as 'idle' | 'aiming' | 'aim2' | 'flying' | 'result' | 'moving' | 'dunk',
     timer: 0, power: 0, powerDir: 1,
-    releaseAccuracy: 50, releaseDir: 2,
+    aim: 50, aimDir: 1.2,
     ballT: 0, ballStartX: 0, ballStartY: 0,
     ballEndX: 0, ballEndY: 0, ballArcH: 0,
     made: false, resultText: '', resultColor: '#fff',
     playerScore: 0, cpuScore: 0, playerTurn: true,
     timeLeft: 0, gameOver: false, shotSpot: 0,
     rimBounce: 0, netAnim: 0, clicked: false,
-    // New features
     streak: 0, onFire: false,
     playerX: 260, playerY: 320, targetSpot: 0,
     moveProgress: 0,
     particles: [] as { x: number; y: number; vx: number; vy: number; life: number; color: string }[],
     dunkPhase: 0,
-    shotClock: 0,
     perfectShots: 0,
     swish: false,
+    lastShotPerfect: false,
   });
 
   useEffect(() => {
@@ -717,18 +838,20 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
       setHud({ player: g.playerScore, cpu: g.cpuScore, time: Math.ceil(Math.max(0, g.timeLeft)), playerTurn: g.playerTurn, gameOver: g.gameOver, message: msg });
     };
 
-    const launchBall = (accuracy: number, releaseQuality: number) => {
-      const spot = SHOT_SPOTS[g.shotSpot];
+    const launchBall = (powerErr: number, aimErr: number) => {
       g.ballStartX = g.playerX + 10; g.ballStartY = g.playerY - 28;
-      const fireBonus = g.onFire ? threshold * 0.3 : 0;
-      g.made = (accuracy + releaseQuality * 0.5) < (threshold + fireBonus);
-      g.swish = g.made && accuracy < threshold * 0.3;
+      const fireBonus = g.onFire ? threshold * 0.4 : 0;
+      const totalErr = powerErr + aimErr * 0.6;
+      g.made = totalErr < (threshold + fireBonus);
+      g.swish = g.made && totalErr < threshold * 0.2;
+      g.lastShotPerfect = g.made && totalErr < threshold * 0.3;
       if (g.made) {
         g.ballEndX = rimX - 12 + (Math.random() - 0.5) * 6;
         g.ballEndY = rimY;
         g.ballArcH = 130 + Math.random() * 30;
       } else {
-        const miss = (accuracy > 0 ? 1 : -1) * (0.3 + Math.random() * 0.5);
+        const missDir = aimErr > 25 ? (g.aim > 50 ? 1 : -1) : (Math.random() < 0.5 ? 1 : -1);
+        const miss = missDir * (0.3 + Math.random() * 0.5);
         g.ballEndX = rimX - 12 + miss * 35;
         g.ballEndY = rimY + Math.abs(miss) * 20 - 15;
         g.ballArcH = 90 + Math.random() * 60;
@@ -781,6 +904,7 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
 
     g.phase = 'idle'; g.timer = 30; g.playerScore = 0; g.cpuScore = 0;
     g.timeLeft = gameTime; g.playerTurn = true; g.gameOver = false; g.shotSpot = 0;
+    g.particles = []; g.streak = 0; g.onFire = false; g.lastShotPerfect = false;
     syncHud('Click to shoot!');
 
     const loop = () => {
@@ -820,13 +944,14 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
           // Dunk check
           if (isHuman && (spot as { dunk?: boolean }).dunk) {
             g.phase = 'aiming'; g.power = 0; g.powerDir = 1.8;
-            syncHud(g.playerTurn ? 'Click to DUNK!' : `${p2Label}: Click to DUNK!`);
+            syncHud(g.playerTurn ? 'Stop the POWER!' : `${p2Label}: Stop the POWER!`);
           } else if (isHuman) {
             g.phase = 'aiming'; g.power = 0; g.powerDir = 1.4;
-            syncHud(g.playerTurn ? 'Click to shoot!' : `${p2Label}: Click to shoot!`);
+            syncHud(g.playerTurn ? 'Stop the POWER!' : `${p2Label}: Stop the POWER!`);
           } else {
             const acc = Math.random() < cpuMake ? Math.random() * threshold * 0.8 : threshold + Math.random() * 20;
-            launchBall(acc, threshold * 0.3);
+            const aimAcc = Math.random() < cpuMake ? Math.random() * threshold * 0.9 : threshold + Math.random() * 15;
+            launchBall(acc, aimAcc);
           }
         }
         if ((g.playerTurn || gameMode === '2p') && g.clicked && g.timer > 0) { g.clicked = false; g.timer = 0; }
@@ -836,13 +961,25 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
         if (g.power <= 0) { g.power = 0; g.powerDir = 1; }
         if (g.clicked) {
           g.clicked = false;
-          const spot = SHOT_SPOTS[g.shotSpot];
-          if ((spot as { dunk?: boolean }).dunk && Math.abs(g.power - 75) < threshold) {
-            // Dunk!
+          // Click 1: lock power, start aim bar
+          g.aim = 50;
+          g.aimDir = (Math.random() < 0.5 ? 1 : -1) * (difficulty === 'hard' ? 2.6 : difficulty === 'medium' ? 1.8 : 1.2);
+          g.phase = 'aim2';
+          syncHud(g.playerTurn ? 'Now stop the AIM!' : `${p2Label}: Stop the AIM!`);
+        }
+      } else if (g.phase === 'aim2') {
+        g.aim += g.aimDir;
+        if (g.aim >= 100) { g.aim = 100; g.aimDir = -Math.abs(g.aimDir); }
+        if (g.aim <= 0) { g.aim = 0; g.aimDir = Math.abs(g.aimDir); }
+        if (g.clicked) {
+          g.clicked = false;
+          const spot2 = SHOT_SPOTS[g.shotSpot];
+          const powerErr = Math.abs(g.power - 75);
+          const aimErr = Math.abs(g.aim - 50);
+          if ((spot2 as { dunk?: boolean }).dunk && powerErr < threshold && aimErr < threshold * 1.5) {
             g.phase = 'dunk'; g.dunkPhase = 0;
           } else {
-            // Single-click: power determines shot quality
-            launchBall(Math.abs(g.power - 75), 0);
+            launchBall(powerErr, aimErr);
           }
         }
       } else if (g.phase === 'dunk') {
@@ -1002,8 +1139,25 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
         }
         ctx.lineCap = 'butt';
       };
-      const isAiming = g.phase === 'aiming' || (g.phase === 'idle' && g.playerTurn);
+      const isAiming = g.phase === 'aiming' || g.phase === 'aim2' || (g.phase === 'idle' && g.playerTurn);
       drawMii(spot.x, spot.y, g.playerTurn ? '#3b82f6' : '#ef4444', isAiming || g.phase === 'flying');
+
+      // Streak counter above player
+      if (g.streak >= 2 && g.playerTurn) {
+        ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 3;
+        const st = `🔥 ${g.streak}x`;
+        ctx.strokeText(st, spot.x, spot.y - 48);
+        ctx.fillStyle = g.onFire ? '#f97316' : '#ffe082';
+        ctx.fillText(st, spot.x, spot.y - 48);
+      }
+
+      // Shot spot name during aiming
+      if ((g.phase === 'aiming' || g.phase === 'aim2') && (g.playerTurn || gameMode === '2p')) {
+        ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillText(SHOT_SPOTS[g.shotSpot].label.toUpperCase(), spot.x, spot.y - 62);
+      }
 
       // Ball
       const drawBall = (bx: number, by: number, r: number) => {
@@ -1014,7 +1168,7 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
         ctx.beginPath(); ctx.moveTo(bx - r, by); ctx.lineTo(bx + r, by); ctx.stroke();
       };
 
-      if (g.phase === 'aiming' || (g.phase === 'idle' && g.timer > 5)) {
+      if (g.phase === 'aiming' || g.phase === 'aim2' || (g.phase === 'idle' && g.timer > 5)) {
         drawBall(spot.x + 10, spot.y - 26, 7);
       }
       if (g.phase === 'flying') {
@@ -1022,6 +1176,10 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
         const bx = g.ballStartX + (g.ballEndX - g.ballStartX) * t;
         const by = g.ballStartY + (g.ballEndY - g.ballStartY) * t - Math.sin(t * Math.PI) * g.ballArcH;
         const br = 7 - t * 2;
+        // Ball shadow on court
+        const shadowScale = 0.8 + (1 - t) * 0.4;
+        ctx.fillStyle = `rgba(0,0,0,${0.12 * shadowScale})`;
+        ctx.beginPath(); ctx.ellipse(bx, H * 0.86, 11 * shadowScale, 3.5 * shadowScale, 0, 0, Math.PI * 2); ctx.fill();
         if (br > 2) drawBall(bx, by, br);
       }
       if (g.phase === 'result' && g.made && g.timer > 22) {
@@ -1039,34 +1197,61 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
 
       // (streak tracked via on-fire rim effect only - no text)
 
-      // Power meter (clean Wii-style)
-      if (g.phase === 'aiming' || g.phase === 'release') {
+      // Power meter — vertical, click 1
+      if (g.phase === 'aiming' || g.phase === 'aim2') {
         const pmX = 24, pmY = H * 0.2, pmH = 180, pmW = 14;
+        const locked = g.phase === 'aim2';
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 14, pmW + 6, pmH + 24, 8); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 18, pmW + 6, pmH + 28, 8); ctx.fill();
         ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 14, pmW + 6, pmH + 24, 8); ctx.stroke();
-        // Track
+        ctx.beginPath(); ctx.roundRect(pmX - 3, pmY - 18, pmW + 6, pmH + 28, 8); ctx.stroke();
+        ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = locked ? '#22c55e' : '#888';
+        ctx.fillText('PWR', pmX + pmW / 2, pmY - 5);
         ctx.fillStyle = '#e5e5e5'; ctx.fillRect(pmX, pmY, pmW, pmH);
-        // Sweet zone
         ctx.fillStyle = 'rgba(34,197,94,0.3)';
         ctx.fillRect(pmX, pmY + pmH * 0.15, pmW, pmH * 0.2);
-        // Fill
         const fillH = (g.power / 100) * pmH;
-        const barColor = g.power > 65 && g.power < 85 ? '#22c55e' : g.power > 45 ? '#eab308' : '#ef4444';
+        const barColor = locked ? '#22c55e' : (g.power > 65 && g.power < 85 ? '#22c55e' : g.power > 45 ? '#eab308' : '#ef4444');
         ctx.fillStyle = barColor;
         ctx.fillRect(pmX, pmY + pmH - fillH, pmW, fillH);
-        // Pointer
-        ctx.fillStyle = '#333';
-        const arrowY = pmY + pmH - fillH;
-        ctx.beginPath();
-        ctx.moveTo(pmX + pmW + 3, arrowY);
-        ctx.lineTo(pmX + pmW + 10, arrowY - 5);
-        ctx.lineTo(pmX + pmW + 10, arrowY + 5);
-        ctx.closePath(); ctx.fill();
+        if (!locked) {
+          ctx.fillStyle = '#333';
+          const arrowY = pmY + pmH - fillH;
+          ctx.beginPath();
+          ctx.moveTo(pmX + pmW + 3, arrowY);
+          ctx.lineTo(pmX + pmW + 10, arrowY - 5);
+          ctx.lineTo(pmX + pmW + 10, arrowY + 5);
+          ctx.closePath(); ctx.fill();
+        }
       }
 
-      // (single-click shooting - no release meter)
+      // Aim meter — horizontal, click 2
+      if (g.phase === 'aim2') {
+        const amX = 60, amY = H - 48, amW = W - 120, amH = 14;
+        ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        ctx.beginPath(); ctx.roundRect(amX - 4, amY - 18, amW + 8, amH + 26, 8); ctx.fill();
+        ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(amX - 4, amY - 18, amW + 8, amH + 26, 8); ctx.stroke();
+        ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#888';
+        ctx.fillText('AIM — TAP when centered!', amX + amW / 2, amY - 5);
+        ctx.fillStyle = '#e5e5e5'; ctx.fillRect(amX, amY, amW, amH);
+        // Sweet zone (center)
+        const szW = amW * 0.12;
+        ctx.fillStyle = 'rgba(34,197,94,0.35)';
+        ctx.fillRect(amX + amW * 0.5 - szW / 2, amY, szW, amH);
+        // Indicator
+        const aimPx = amX + (g.aim / 100) * amW;
+        const aimErr2 = Math.abs(g.aim - 50);
+        ctx.fillStyle = aimErr2 < 8 ? '#22c55e' : aimErr2 < 20 ? '#eab308' : '#ef4444';
+        ctx.fillRect(aimPx - 5, amY - 2, 10, amH + 4);
+        ctx.font = '8px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#555';
+        ctx.fillText('◀ LEFT', amX + 18, amY + amH + 8);
+        ctx.fillText('CENTER', amX + amW / 2, amY + amH + 8);
+        ctx.fillText('RIGHT ▶', amX + amW - 18, amY + amH + 8);
+      }
 
       // ── SCOREBOARD (Wii-clean) ──
       ctx.fillStyle = 'rgba(255,255,255,0.88)';
@@ -1094,28 +1279,51 @@ function Basketball({ difficulty, gameMode, onExit }: { difficulty: Difficulty; 
 
       // Result banner
       if (g.phase === 'result' && g.timer > 12) {
+        const bannerH = g.lastShotPerfect && g.made ? 62 : 44;
         ctx.fillStyle = g.made ? 'rgba(34,197,94,0.85)' : 'rgba(220,50,50,0.8)';
-        ctx.beginPath(); ctx.roundRect(W / 2 - 90, H / 2 - 22, 180, 44, 12); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(W / 2 - 100, H / 2 - 22, 200, bannerH, 12); ctx.fill();
         ctx.font = 'bold 22px system-ui, sans-serif'; ctx.textAlign = 'center';
         ctx.fillStyle = '#fff';
-        ctx.fillText(g.resultText, W / 2, H / 2 + 8);
+        ctx.fillText(g.resultText, W / 2, H / 2 + (g.lastShotPerfect && g.made ? 0 : 8));
+        if (g.lastShotPerfect && g.made) {
+          ctx.font = 'bold 12px system-ui, sans-serif';
+          ctx.fillStyle = '#fbbf24';
+          ctx.fillText('✦ PERFECT RELEASE ✦', W / 2, H / 2 + 20);
+        }
       }
 
       if (!g.gameOver) raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); canvas.removeEventListener('click', onClick); canvas.removeEventListener('touchstart', onClick); };
-  }, [difficulty, gameMode, threshold, cpuMake, gameTime]);
+  }, [difficulty, gameMode, threshold, cpuMake, gameTime, gameKey]);
 
   return (
     <div className="flex flex-col items-center gap-3 p-4">
       <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] aspect-[600/420] touch-none cursor-pointer" />
       <p className="text-white font-bold text-sm min-h-[1.5rem]">{hud.message}</p>
-      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Click to shoot!' : `${gameMode === '2p' ? 'P2' : 'CPU'} shooting...`}</p>
+      <p className="text-white/50 text-xs">{hud.playerTurn ? 'Tap: stop POWER → stop AIM → shoot!' : `${gameMode === '2p' ? 'P2' : 'CPU'} shooting...`}</p>
       {hud.gameOver && (
-        <div className="space-y-2 text-center">
-          <p className="text-yellow-300 font-black text-xl">{hud.player > hud.cpu ? (gameMode === '2p' ? 'P1 WINS! 🏆' : 'YOU WIN! 🏆') : hud.player < hud.cpu ? (gameMode === '2p' ? 'P2 WINS!' : 'CPU Wins!') : 'TIE!'}</p>
-          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 transition-colors">Back to Sports</button>
+        <div className="bg-black/40 rounded-2xl p-4 text-center space-y-3 w-full max-w-[600px]">
+          <p className="text-white/50 text-[10px] uppercase tracking-widest font-bold">Final Score</p>
+          <div className="flex items-center justify-center gap-8">
+            <div className="text-center">
+              <p className="text-white/50 text-xs font-bold mb-0.5">{gameMode === '2p' ? 'P1' : 'YOU'}</p>
+              <p className="text-white font-black text-4xl">{hud.player}</p>
+            </div>
+            <p className="text-white/30 text-2xl font-bold">—</p>
+            <div className="text-center">
+              <p className="text-white/50 text-xs font-bold mb-0.5">{gameMode === '2p' ? 'P2' : 'CPU'}</p>
+              <p className="text-white font-black text-4xl">{hud.cpu}</p>
+            </div>
+          </div>
+          <p className="text-yellow-300 font-black text-xl">
+            {hud.player > hud.cpu ? (gameMode === '2p' ? 'P1 WINS!' : 'YOU WIN!') : hud.player < hud.cpu ? (gameMode === '2p' ? 'P2 WINS!' : 'CPU WINS') : 'TIE GAME!'}
+          </p>
+          <div className="flex gap-2 justify-center">
+            <button onClick={() => setGameKey(k => k + 1)} className="px-6 py-2 bg-yellow-400 text-black rounded-xl font-bold hover:bg-yellow-300 active:scale-95 transition-all">Play Again</button>
+            <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 active:scale-95 transition-all">Back</button>
+          </div>
         </div>
       )}
     </div>
@@ -1154,9 +1362,13 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
     introTimer: number;
     particles: { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number }[];
     cornerRest: boolean; cornerTimer: number;
+    roundResults: ('player' | 'cpu' | 'draw')[];
+    stars: number;
+    cpuWindup: number; cpuWindupType: string; cpuWindupHand: 'L' | 'R';
   } | null>(null);
   const animRef = useRef<number>(0);
-  const [, forceUpdate] = useState(0);
+  const [tick, forceUpdate] = useState(0);
+  const [gameKey, setGameKey] = useState(0);
 
   const W = 600, H = 440;
   const cpuAggression = difficulty === 'easy' ? 0.012 : difficulty === 'medium' ? 0.025 : 0.065;
@@ -1186,6 +1398,9 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       introTimer: 90,
       particles: [],
       cornerRest: false, cornerTimer: 0,
+      roundResults: [],
+      stars: 0,
+      cpuWindup: 0, cpuWindupType: '', cpuWindupHand: 'L',
     };
   }
 
@@ -1194,15 +1409,21 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
     if (!s || attacker.stunTimer > 0 || attacker.down || defender.down) return false;
     if (attacker.punchAnim) return false;
 
-    const costs: Record<string, number> = { jab: 6, hook: 12, uppercut: 20, body: 8 };
-    const damages: Record<string, number> = { jab: 5, hook: 10, uppercut: 18, body: 7 };
-    const stuns: Record<string, number> = { jab: 8, hook: 18, uppercut: 30, body: 12 };
-    const ranges: Record<string, number> = { jab: 130, hook: 120, uppercut: 100, body: 115 };
+    const costs: Record<string, number> = { jab: 6, hook: 12, uppercut: 20, body: 8, star: 8 };
+    const damages: Record<string, number> = { jab: 5, hook: 10, uppercut: 18, body: 7, star: 38 };
+    const stuns: Record<string, number> = { jab: 8, hook: 18, uppercut: 30, body: 12, star: 50 };
+    const ranges: Record<string, number> = { jab: 130, hook: 120, uppercut: 100, body: 115, star: 140 };
+
+    // Star punch requires a star
+    if (type === 'star') {
+      if (!s || s.stars < 1) return false;
+      s.stars--;
+    }
 
     const cost = costs[type] || 6;
     if (attacker.stamina < cost) return false;
     attacker.stamina -= cost;
-    attacker.punchAnim = { type, hand, timer: type === 'uppercut' ? 18 : type === 'hook' ? 14 : 10 };
+    attacker.punchAnim = { type, hand, timer: type === 'star' ? 22 : type === 'uppercut' ? 18 : type === 'hook' ? 14 : 10 };
 
     const dist = Math.abs(attacker.x - defender.x);
     const range = ranges[type] || 120;
@@ -1271,14 +1492,16 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         size: 2 + Math.random() * 3,
       });
     }
-    s.shakeTimer = type === 'uppercut' ? 10 : type === 'hook' ? 7 : 4;
-    s.shakeIntensity = type === 'uppercut' ? 6 : type === 'hook' ? 4 : 2;
+    s.shakeTimer = type === 'star' ? 16 : type === 'uppercut' ? 10 : type === 'hook' ? 7 : 4;
+    s.shakeIntensity = type === 'star' ? 12 : type === 'uppercut' ? 6 : type === 'hook' ? 4 : 2;
+    if (type === 'star') s.slowMo = 20;
 
     const hitMsgs: Record<string, string[]> = {
       jab: ['JAB!', 'Quick hit!', 'Snap!'],
       hook: ['HOOK!', 'Big swing!', 'POW!'],
       uppercut: ['UPPERCUT!', 'MASSIVE HIT!', 'BOOM!'],
       body: ['Body blow!', 'To the body!', 'OOF!'],
+      star: ['★ STAR PUNCH!', '★ DEVASTATING!', '★ CRUSHING BLOW!'],
     };
     const msgs = hitMsgs[type] || ['HIT!'];
     s.message = `${msgs[Math.floor(Math.random() * msgs.length)]} -${dmg}`;
@@ -1286,6 +1509,22 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
 
     if (s.comboCount >= 3 && attacker === s.player) {
       s.message = `${s.comboCount}x COMBO! ${s.message}`;
+    }
+
+    // Earn star at 5+ combo
+    if (s.comboCount >= 5 && attacker === s.player && s.stars < 3) {
+      s.stars++;
+      s.comboCount = 0; // reset so they need another streak
+    }
+
+    // Crowd camera flashes on big hits
+    if (dmg > 12) {
+      for (let i = 0; i < 5; i++) {
+        s.particles.push({
+          x: Math.random() * W, y: 10 + Math.random() * (H * 0.35),
+          vx: 0, vy: 0, life: 4 + Math.random() * 4, color: '#fff', size: 3 + Math.random() * 3,
+        });
+      }
     }
 
     // Check knockdown
@@ -1341,12 +1580,13 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         else if (key === 'r') punch(s.player, s.cpu, 'uppercut', 'R');
         else if (key === 't') punch(s.player, s.cpu, 'body', 'L');
       } else {
-        // 1P: P1 uses J/K/H/U/B
+        // 1P: P1 uses J/K/H/U/B/N
         if (key === 'j') punch(s.player, s.cpu, 'jab', 'L');
         else if (key === 'k') punch(s.player, s.cpu, 'jab', 'R');
         else if (key === 'h') punch(s.player, s.cpu, 'hook', 'L');
         else if (key === 'u') punch(s.player, s.cpu, 'uppercut', 'R');
         else if (key === 'b') punch(s.player, s.cpu, 'body', 'L');
+        else if (key === 'n') punch(s.player, s.cpu, 'star', 'R');
       }
 
       // P2 keyboard punches (2P only)
@@ -1480,9 +1720,20 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         bx += facing * -6 * (boxer.hitAnim / 12);
       }
 
-      // Sway
-      const sway = Math.sin(Date.now() / 800 + (isPlayer ? 0 : 3)) * 2;
+      // Sway (more when fatigued)
+      const fatigueMult = boxer.stamina < 25 ? 2.5 : boxer.stamina < 50 ? 1.5 : 1;
+      const sway = Math.sin(Date.now() / (boxer.stamina < 25 ? 500 : 800) + (isPlayer ? 0 : 3)) * 2 * fatigueMult;
       bx += sway;
+
+      // Dodge afterimage
+      if (boxer.dodgeTimer > 8) {
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = isPlayer ? '#3b82f6' : '#ef4444';
+        ctx.beginPath();
+        ctx.arc(bx - boxer.dodgeDir * 20, by - 10, 30, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
 
       // Knockdown
       if (boxer.down) {
@@ -1589,18 +1840,21 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
           } else if (pa.type === 'uppercut') {
             lGloveX = bx + facing * (10 + punchExtend * 40);
             lGloveY = by + 10 - punchExtend * 40;
+          } else if (pa.type === 'star') {
+            lGloveX = bx + facing * (10 + punchExtend * 50);
+            lGloveY = by + 5 - punchExtend * 45;
           } else {
             lGloveX = bx + facing * (20 + punchExtend * 50);
             lGloveY = by + 10;
           }
         }
-        if (pa.hand === 'R' || pa.type === 'uppercut') {
+        if (pa.hand === 'R' || pa.type === 'uppercut' || pa.type === 'star') {
           if (pa.type === 'jab') {
             rGloveX = bx + facing * (20 + punchExtend * 55);
             rGloveY = by + 4;
-          } else if (pa.type === 'uppercut') {
-            rGloveX = bx + facing * (10 + punchExtend * 40);
-            rGloveY = by + 15 - punchExtend * 45;
+          } else if (pa.type === 'uppercut' || pa.type === 'star') {
+            rGloveX = bx + facing * (10 + punchExtend * 45);
+            rGloveY = by + 15 - punchExtend * 50;
           } else {
             rGloveX = bx + facing * (15 + punchExtend * 45);
             rGloveY = by + 8;
@@ -1620,7 +1874,17 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       ctx.beginPath(); ctx.arc(lGloveX + 2, lGloveY + 2, gloveSize, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(rGloveX + 2, rGloveY + 2, gloveSize, 0, Math.PI * 2); ctx.fill();
 
-      ctx.fillStyle = gloveColor;
+      // Star punch glow
+      const isStarPunch = boxer.punchAnim?.type === 'star';
+      const activeGloveColor = isStarPunch ? '#ffd700' : gloveColor;
+      if (isStarPunch) {
+        const glow = 0.3 + 0.3 * Math.sin(Date.now() / 60);
+        ctx.fillStyle = `rgba(255,215,0,${glow})`;
+        ctx.beginPath(); ctx.arc(lGloveX, lGloveY, gloveSize + 6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(rGloveX, rGloveY, gloveSize + 6, 0, Math.PI * 2); ctx.fill();
+      }
+
+      ctx.fillStyle = activeGloveColor;
       ctx.beginPath(); ctx.arc(lGloveX, lGloveY, gloveSize, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(rGloveX, rGloveY, gloveSize, 0, Math.PI * 2); ctx.fill();
 
@@ -1628,6 +1892,19 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.beginPath(); ctx.arc(lGloveX - 3, lGloveY - 3, gloveSize * 0.5, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(rGloveX - 3, rGloveY - 3, gloveSize * 0.5, 0, Math.PI * 2); ctx.fill();
+
+      // CPU windup tell — glowing glove
+      if (!isPlayer && s.cpuWindup > 0) {
+        const tellPulse = 0.3 + 0.4 * Math.sin(Date.now() / 60);
+        const tellColor = s.cpuWindupType === 'uppercut' ? `rgba(239,68,68,${tellPulse})` :
+          s.cpuWindupType === 'hook' ? `rgba(251,191,36,${tellPulse})` : `rgba(255,255,255,${tellPulse * 0.7})`;
+        ctx.fillStyle = tellColor;
+        if (s.cpuWindupHand === 'L') {
+          ctx.beginPath(); ctx.arc(lGloveX, lGloveY, gloveSize + 5, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.beginPath(); ctx.arc(rGloveX, rGloveY, gloveSize + 5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
 
       // Arms connecting to gloves
       ctx.strokeStyle = skinColor;
@@ -1707,12 +1984,58 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       // Stamina bar (player)
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fillRect(15, 38, 120, 10);
-      ctx.fillStyle = '#facc15';
+      ctx.fillStyle = s.player.stamina < 25 ? '#ef4444' : '#facc15';
       ctx.fillRect(16, 39, 118 * (s.player.stamina / 100), 8);
       ctx.fillStyle = '#fff';
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText('STA', 17, 47);
+
+      // Stamina bar (CPU)
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(W - 135, 38, 120, 10);
+      ctx.fillStyle = s.cpu.stamina < 25 ? '#ef4444' : '#facc15';
+      ctx.fillRect(W - 134, 39, 118 * (s.cpu.stamina / 100), 8);
+      ctx.fillStyle = '#fff';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('STA', W - 17, 47);
+
+      // Star indicators (player)
+      if (s.stars > 0) {
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'left';
+        const starFlash = 0.7 + 0.3 * Math.sin(Date.now() / 200);
+        ctx.globalAlpha = starFlash;
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('★'.repeat(s.stars), 15, 62);
+        ctx.globalAlpha = 1;
+      }
+
+      // Combo counter
+      if (s.comboCount >= 2 && s.comboTimer > 0) {
+        const scale = Math.min(1.6, 1 + s.comboCount * 0.12);
+        ctx.font = `bold ${Math.floor(18 * scale)}px sans-serif`;
+        ctx.fillStyle = s.comboCount >= 5 ? '#ef4444' : s.comboCount >= 3 ? '#fbbf24' : '#fff';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'left';
+        const comboY = s.stars > 0 ? 78 : 62;
+        ctx.strokeText(`${s.comboCount}x COMBO`, 15, comboY);
+        ctx.fillText(`${s.comboCount}x COMBO`, 15, comboY);
+      }
+
+      // Round scorecard (between rounds)
+      if (s.roundResults.length > 0 && (s.roundPhase === 'roundEnd' || s.roundPhase === 'countdown')) {
+        ctx.textAlign = 'center';
+        ctx.font = '10px sans-serif';
+        for (let i = 0; i < s.roundResults.length; i++) {
+          const rx = W / 2 - ((s.roundResults.length - 1) * 30) / 2 + i * 30;
+          ctx.fillStyle = s.roundResults[i] === 'player' ? '#22c55e' : s.roundResults[i] === 'cpu' ? '#ef4444' : '#888';
+          ctx.fillText(`R${i + 1}`, rx, 55);
+          ctx.fillText(s.roundResults[i] === 'player' ? (gameMode === '2p' ? 'P1' : 'YOU') : s.roundResults[i] === 'cpu' ? (gameMode === '2p' ? 'P2' : 'CPU') : 'TIE', rx, 65);
+        }
+      }
 
       // Round info
       ctx.textAlign = 'center';
@@ -1785,7 +2108,7 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         ctx.fillText(`Final Score: ${s.playerScore} - ${s.cpuScore}`, W / 2, H * 0.5);
         ctx.font = '14px sans-serif';
         ctx.fillStyle = '#ccc';
-        ctx.fillText('Press ENTER or click to continue', W / 2, H * 0.62);
+        ctx.fillText('Use buttons below', W / 2, H * 0.62);
       }
 
       // Round start
@@ -1815,9 +2138,9 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
           ctx.fillText('P1: WASD=Move | SPACE=Block | Q/E=Dodge | F=Jab G=Hook R=Upper T=Body', W / 2, H * 0.83);
           ctx.fillText('P2: Arrows=Move | SHIFT=Block | ,/.=Dodge | J=Jab K=Hook U=Upper I=Body', W / 2, H * 0.88);
         } else {
-          ctx.fillText('J/K = Left/Right Jab | H = Hook | U = Uppercut | B = Body', W / 2, H * 0.83);
-          ctx.fillText('A/D = Move | SPACE = Block | Q/E = Dodge | W = Forward', W / 2, H * 0.88);
-          ctx.fillText('Or use the buttons below!', W / 2, H * 0.93);
+          ctx.fillText('J = Left Punch | K = Right Punch | H = Hook | U = Upper | N = ★ Star', W / 2, H * 0.83);
+          ctx.fillText('A/D = Move | SPACE = Block | Q/E = Dodge | Watch for glowing glove tells!', W / 2, H * 0.88);
+          ctx.fillText('Punch type auto-picks based on distance & timing!', W / 2, H * 0.93);
         }
         ctx.globalAlpha = 1;
       }
@@ -1829,44 +2152,76 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       if (cpu.down || player.down || s.roundPhase !== 'fight') return;
 
       const dist = Math.abs(cpu.x - player.x);
+      const windupTime = difficulty === 'easy' ? 28 : difficulty === 'medium' ? 18 : 10;
 
-      // Movement AI
-      if (dist > 140) {
-        cpu.x += cpu.x > player.x ? -1.5 : 1.5;
-      } else if (dist < 80) {
-        cpu.x += cpu.x > player.x ? 1 : -1;
+      // Movement AI — approach, maintain fighting distance
+      const idealDist = 100 + (s.cpuPattern === 0 ? -20 : s.cpuPattern === 1 ? 15 : 0);
+      if (dist > idealDist + 30) {
+        cpu.x += cpu.x > player.x ? -1.8 : 1.8;
+      } else if (dist < idealDist - 20) {
+        cpu.x += cpu.x > player.x ? 1.2 : -1.2;
+      } else {
+        // Side-to-side movement when at range
+        cpu.x += Math.sin(Date.now() / 600) * 0.8;
       }
 
-      // Blocking AI - block when player is punching
+      // Blocking AI — react to player punches
       if (player.punchAnim && Math.random() < cpuBlockChance) {
         cpu.blocking = true;
-      } else if (!player.punchAnim && cpu.blocking && Math.random() < 0.1) {
+        s.cpuWindup = 0; // cancel windup if blocking
+      } else if (!player.punchAnim && cpu.blocking && Math.random() < 0.08) {
         cpu.blocking = false;
       }
 
-      // Dodge AI
+      // Dodge AI — dodge big punches
       if (player.punchAnim && player.punchAnim.timer > 5 && Math.random() < cpuDodgeChance && cpu.dodgeTimer <= 0) {
         cpu.dodgeDir = Math.random() < 0.5 ? -1 : 1;
         cpu.dodgeTimer = 15;
         cpu.blocking = false;
+        s.cpuWindup = 0;
       }
 
-      // Attack AI
-      if (cpu.stunTimer <= 0 && !cpu.punchAnim && !cpu.blocking && dist < 135) {
+      // Windup countdown — telegraph then execute
+      if (s.cpuWindup > 0) {
+        s.cpuWindup--;
+        if (s.cpuWindup <= 0 && cpu.stunTimer <= 0 && !cpu.punchAnim && !cpu.blocking) {
+          punch(cpu, player, s.cpuWindupType, s.cpuWindupHand);
+        }
+        return; // don't start new attacks while winding up
+      }
+
+      // Attack AI — start windup instead of instant punch
+      if (cpu.stunTimer <= 0 && !cpu.punchAnim && !cpu.blocking && dist < 140 && s.cpuWindup <= 0) {
         const attackRoll = Math.random();
         if (attackRoll < cpuAggression) {
           cpu.blocking = false;
           const r = Math.random();
           const hand: 'L' | 'R' = Math.random() < 0.5 ? 'L' : 'R';
-          if (r < 0.4) punch(cpu, player, 'jab', hand);
-          else if (r < 0.65) punch(cpu, player, 'hook', hand);
-          else if (r < 0.8) punch(cpu, player, 'body', hand);
-          else if (cpu.stamina > 25) punch(cpu, player, 'uppercut', hand);
-          else punch(cpu, player, 'jab', hand);
+          let type: string;
+          if (r < 0.4) type = 'jab';
+          else if (r < 0.65) type = 'hook';
+          else if (r < 0.8) type = 'body';
+          else if (cpu.stamina > 25) type = 'uppercut';
+          else type = 'jab';
+
+          // Big punches get longer telegraph
+          const extraTime = type === 'uppercut' ? 8 : type === 'hook' ? 4 : 0;
+          s.cpuWindup = windupTime + extraTime;
+          s.cpuWindupType = type;
+          s.cpuWindupHand = hand;
         }
       }
 
-      // Pattern changes
+      // Counter-attack after blocking — shorter windup
+      if (cpu.counterWindow > 0 && !cpu.punchAnim && s.cpuWindup <= 0) {
+        s.cpuWindup = Math.floor(windupTime * 0.4);
+        s.cpuWindupType = Math.random() < 0.5 ? 'hook' : 'uppercut';
+        s.cpuWindupHand = Math.random() < 0.5 ? 'L' : 'R';
+        cpu.counterWindow = 0;
+        cpu.blocking = false;
+      }
+
+      // Pattern changes — affects spacing preference
       s.cpuPatternTimer--;
       if (s.cpuPatternTimer <= 0) {
         s.cpuPattern = Math.floor(Math.random() * 3);
@@ -1980,8 +2335,9 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
           // Score round
           const pDmgDealt = 100 - s.cpu.hp;
           const cDmgDealt = 100 - s.player.hp;
-          if (pDmgDealt > cDmgDealt) s.playerScore++;
-          else if (cDmgDealt > pDmgDealt) s.cpuScore++;
+          if (pDmgDealt > cDmgDealt) { s.playerScore++; s.roundResults.push('player'); }
+          else if (cDmgDealt > pDmgDealt) { s.cpuScore++; s.roundResults.push('cpu'); }
+          else s.roundResults.push('draw');
 
           if (s.round >= s.maxRounds) {
             s.roundPhase = 'matchEnd';
@@ -2068,8 +2424,9 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         if (s.keys.has('d') || (gameMode === '1p' && s.keys.has('arrowright'))) p.x = Math.min(W * 0.55, p.x + 2.5);
         if (s.keys.has('w') || (gameMode === '1p' && s.keys.has('arrowup'))) p.x = Math.min(p.x + 1.5, cpu.x - 60);
 
-        // Block
-        p.blocking = s.keys.has(' ');
+        // Block (keyboard = hold SPACE; mobile toggle handled separately)
+        if (s.keys.has(' ')) p.blocking = true;
+        else if (s.keys.size > 0) p.blocking = false; // only unblock from keyboard if keys are being used
 
         // Dodge
         if (s.keys.has('q') && p.dodgeTimer <= 0 && !p.blocking) {
@@ -2169,12 +2526,25 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [punch, gameMode, cpuAggression, cpuBlockChance, cpuDodgeChance]);
+  }, [punch, gameMode, cpuAggression, cpuBlockChance, cpuDodgeChance, gameKey]);
 
   // Button handlers for mobile/click
   const doAttack = (type: string, hand: 'L' | 'R') => {
     const s = stateRef.current;
     if (!s || s.roundPhase !== 'fight') return;
+    punch(s.player, s.cpu, type, hand);
+  };
+
+  // Smart punch — auto-picks type based on distance and context
+  const doSmartPunch = (hand: 'L' | 'R') => {
+    const s = stateRef.current;
+    if (!s || s.roundPhase !== 'fight') return;
+    if (s.player.blocking) { s.player.blocking = false; forceUpdate(n => n + 1); } // drop guard to punch
+    const dist = Math.abs(s.player.x - s.cpu.x);
+    let type = 'jab';
+    if (s.cpu.stunTimer > 12 && dist < 115) type = 'uppercut';
+    else if (dist < 85) type = 'hook';
+    else if (s.cpu.hp < 20 && dist < 120) type = 'body';
     punch(s.player, s.cpu, type, hand);
   };
 
@@ -2229,27 +2599,33 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         onFocus={() => {}}
       />
 
-      {/* Mobile Controls - Clean layout */}
+      {/* Mobile Controls - Simplified Wii-style */}
       <div className="w-full max-w-[600px] space-y-1.5">
         <div className="flex gap-1.5 justify-center">
-          <button onPointerDown={() => doAttack('jab', Math.random() < 0.5 ? 'L' : 'R')} className="px-4 py-2.5 bg-red-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Jab</button>
-          <button onPointerDown={() => doAttack('hook', 'L')} className="px-4 py-2.5 bg-red-700 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Hook</button>
-          <button onPointerDown={() => doAttack('uppercut', 'R')} className="px-4 py-2.5 bg-orange-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Upper</button>
+          <button onPointerDown={() => doSmartPunch('L')} className="px-5 py-3 bg-red-500 text-white font-bold rounded-lg active:scale-90 transition-all text-sm shadow-lg">👊 Left</button>
+          <button onPointerDown={() => doSmartPunch('R')} className="px-5 py-3 bg-red-500 text-white font-bold rounded-lg active:scale-90 transition-all text-sm shadow-lg">Right 👊</button>
           <button
-            onPointerDown={() => doBlock(true)}
-            onPointerUp={() => doBlock(false)}
-            onPointerLeave={() => doBlock(false)}
-            className="px-4 py-2.5 bg-blue-500 text-white font-bold rounded-lg active:bg-blue-700 transition-all text-xs shadow-lg"
-          >Block</button>
+            onPointerDown={() => {
+              const s = stateRef.current;
+              if (s) { s.player.blocking = !s.player.blocking; forceUpdate(n => n + 1); }
+            }}
+            className={`px-5 py-3 font-bold rounded-lg active:scale-95 transition-all text-sm shadow-lg ${tick >= 0 && stateRef.current?.player.blocking ? 'bg-blue-700 text-white ring-2 ring-blue-300' : 'bg-blue-500 text-white'}`}
+          >{tick >= 0 && stateRef.current?.player.blocking ? '🛡 UP' : '🛡 Block'}</button>
         </div>
         <div className="flex gap-1.5 justify-center">
           <button onPointerDown={() => { doMove(-1); doDodge(-1); }} className="px-4 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">← Dodge</button>
-          <button onPointerDown={() => doAttack('body', 'L')} className="px-4 py-2 bg-red-400 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Body</button>
-          <button onPointerDown={mashGetUp} className="px-4 py-2 bg-yellow-500 text-black font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Get Up!</button>
+          <button onPointerDown={() => doAttack('star', 'R')} className="px-4 py-2 bg-yellow-400 text-black font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg border-2 border-yellow-300">★ Star</button>
+          <button onPointerDown={mashGetUp} className="px-4 py-2 bg-yellow-500 text-black font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Mash!</button>
           <button onPointerDown={() => { doMove(1); doDodge(1); }} className="px-4 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg">Dodge →</button>
         </div>
       </div>
 
+      {tick >= 0 && stateRef.current?.roundPhase === 'matchEnd' && (
+        <div className="bg-black/40 rounded-2xl px-4 py-3 text-center w-full max-w-[600px] flex gap-2 justify-center">
+          <button onClick={() => setGameKey(k => k + 1)} className="px-6 py-2 bg-yellow-400 text-black rounded-xl font-bold hover:bg-yellow-300 active:scale-95 transition-all">Play Again</button>
+          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 active:scale-95 transition-all">Back</button>
+        </div>
+      )}
       <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
     </div>
   );
@@ -2259,7 +2635,8 @@ function Boxing({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
 function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
-  const [, forceUpdate] = useState(0);
+  const [tick, forceUpdate] = useState(0);
+  const [gameKey, setGameKey] = useState(0);
 
   const W = 600, H = 420;
   const COURT_LEFT = 60, COURT_RIGHT = W - 60, COURT_TOP = 70, COURT_BOTTOM = H - 50;
@@ -2290,6 +2667,8 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
     introTimer: number;
     serveTimer: number;
     pointDelay: number;
+    // Swing timing
+    swingReadyTimer: number; swingQuality: string; swingQualityTimer: number;
     // New
     playerStamina: number; cpuStamina: number;
     servePower: number; servePowerDir: number; servePowerPhase: boolean;
@@ -2332,6 +2711,7 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       // New
       playerStamina: 100, cpuStamina: 100,
       servePower: 0, servePowerDir: 1, servePowerPhase: false,
+      swingReadyTimer: 0, swingQuality: '', swingQualityTimer: 0,
       spinType: 'flat' as 'flat' | 'topspin' | 'slice',
       umpireCall: '', umpireTimer: 0,
       ballMarks: [] as { x: number; y: number; life: number }[],
@@ -2389,16 +2769,20 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       s.rally = 0;
 
       if (who === 'player') {
+        const sPow = s.servePowerPhase ? s.servePower / 100 : 0.55;
+        const sAcc = sPow > 0.65 ? (sPow - 0.65) * 2.5 : 0; // high power = less accuracy
         const targetX = s.serveSide === 'right' ? W * 0.35 + Math.random() * 60 : W * 0.45 + Math.random() * 60;
         s.ballX = s.playerX;
         s.ballY = s.playerY - 10;
         s.ballZ = 30;
-        s.ballVX = (targetX - s.ballX) * 0.025;
-        s.ballVY = -4.5 - Math.random();
-        s.ballVZ = 3;
+        s.ballVX = (targetX - s.ballX) * (0.018 + sPow * 0.014) + (Math.random() - 0.5) * sAcc * 3;
+        s.ballVY = -(3.8 + sPow * 2.2);
+        s.ballVZ = 2.5 + sPow * 1.5;
         s.ballSpin = (Math.random() - 0.5) * 0.3;
         s.playerSwing = 15;
         s.playerSwingType = 'serve';
+        s.servePowerPhase = false;
+        s.servePower = 0;
       } else {
         const targetX = s.serveSide === 'right' ? W * 0.45 + Math.random() * 60 : W * 0.35 + Math.random() * 60;
         s.ballX = s.cpuX;
@@ -2432,6 +2816,12 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         // Stamina cost
         s.playerStamina = Math.max(0, s.playerStamina - 3);
         const staminaMult = 0.7 + (s.playerStamina / 100) * 0.3;
+        // Timing quality
+        const t = s.swingReadyTimer;
+        const timingMult = t <= 5 ? 0.72 : t <= 18 ? 1.25 : 0.82;
+        s.swingQuality = t <= 5 ? 'EARLY' : t <= 18 ? 'PERFECT!' : 'LATE';
+        s.swingQualityTimer = 45;
+        s.swingReadyTimer = 0;
 
         // Spin type affects ball
         const spin = s.spinType;
@@ -2445,7 +2835,7 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         const dx = aimX - s.ballX;
         const dy = aimY - s.ballY;
         const d = Math.sqrt(dx * dx + dy * dy);
-        const speed = (4 + Math.random() * 2) * staminaMult;
+        const speed = (4 + Math.random() * 2) * staminaMult * timingMult;
         s.ballVX = (dx / d) * speed * 0.7 + spinVXBonus;
         s.ballVY = (dy / d) * speed;
         s.ballVZ = 2.5 + Math.random() * 1.5 + spinVZBonus;
@@ -2521,6 +2911,7 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
             s.winner = s.playerSets >= 2 ? `${p1Label} WIN${gameMode === '2p' ? 'S' : ''}!` : `${p2Label} Wins!`;
             s.phase = 'gameOver';
             s.message = s.winner;
+            forceUpdate(n => n + 1);
           }
         }
       }
@@ -2564,6 +2955,16 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       // Serve timer
       if (s.serveTimer > 0) s.serveTimer--;
 
+      // Serve power oscillation (player)
+      if (s.serving && s.server === 'player' && s.serveTimer <= 0 && !s.ballActive) {
+        s.servePowerPhase = true;
+        s.servePower += s.servePowerDir * 1.8;
+        if (s.servePower >= 100) { s.servePower = 100; s.servePowerDir = -1; }
+        if (s.servePower <= 0) { s.servePower = 0; s.servePowerDir = 1; }
+      } else if (!s.serving) {
+        s.servePowerPhase = false;
+      }
+
       // P2/CPU serve
       if (s.serving && s.server === 'cpu' && s.serveTimer <= 0) {
         if (gameMode === '2p') {
@@ -2606,14 +3007,23 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       s.playerX = Math.max(COURT_LEFT - 20, Math.min(COURT_RIGHT + 20, s.playerX));
       s.playerY = Math.max(NET_Y + 20, Math.min(H - 15, s.playerY));
 
+      // Swing quality timer
+      if (s.swingQualityTimer > 0) s.swingQualityTimer--;
+
       // P1 swing when ball is close
       if (s.ballActive && s.playerSwing <= 0 && !s.serving) {
         const dist = Math.sqrt((s.ballX - s.playerX) ** 2 + (s.ballY - s.playerY) ** 2);
-        if (dist < 45 && s.ballY > NET_Y && s.ballZ < 30 && s.lastHitter !== 'player') {
+        const inRange = dist < 45 && s.ballY > NET_Y && s.ballZ < 30 && s.lastHitter !== 'player';
+        if (inRange) {
+          s.swingReadyTimer++;
           if (s.keys.has(' ') || s.keys.has('j') || s.keys.has('k')) {
             attemptSwing(s, 'player');
           }
+        } else {
+          s.swingReadyTimer = 0;
         }
+      } else {
+        s.swingReadyTimer = 0;
       }
 
       // P2/CPU movement
@@ -2950,13 +3360,62 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         ctx.fillText(scoreString(s), W / 2, 68);
       }
 
-      // Serving indicator
+      // Rally counter
+      if (s.rally >= 3 && s.ballActive) {
+        ctx.textAlign = 'left';
+        ctx.font = `bold 12px sans-serif`;
+        ctx.fillStyle = s.rally >= 10 ? '#fbbf24' : '#a3e635';
+        ctx.fillText(`Rally: ${s.rally}`, 8, 20);
+      }
+
+      // Serving indicator / serve power bar
       if (s.serving) {
-        const flash = 0.5 + 0.5 * Math.sin(Date.now() / 200);
-        ctx.globalAlpha = flash;
-        ctx.font = 'bold 14px sans-serif';
-        ctx.fillStyle = '#fbbf24';
-        ctx.fillText(s.server === 'player' ? 'CLICK TO SERVE' : (gameMode === '2p' ? 'P2: ENTER TO SERVE' : 'CPU SERVING...'), W / 2, H - 15);
+        if (s.servePowerPhase && s.server === 'player') {
+          // Power bar
+          const bw = 160, bh = 14;
+          const bx = W / 2 - bw / 2, by = H - 42;
+          ctx.fillStyle = 'rgba(0,0,0,0.65)';
+          ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx - 2, by - 2, bw + 4, bh + 4, 5); else ctx.rect(bx - 2, by - 2, bw + 4, bh + 4); ctx.fill();
+          const pct = s.servePower / 100;
+          ctx.fillStyle = pct > 0.72 ? '#ef4444' : pct > 0.45 ? '#fbbf24' : '#22c55e';
+          ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw * pct, bh, 3); else ctx.rect(bx, by, bw * pct, bh); ctx.fill();
+          ctx.font = 'bold 10px sans-serif';
+          ctx.fillStyle = '#fff';
+          ctx.textAlign = 'center';
+          ctx.fillText('SERVE POWER — TAP!', W / 2, by - 5);
+        } else {
+          const flash = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+          ctx.globalAlpha = flash;
+          ctx.font = 'bold 14px sans-serif';
+          ctx.fillStyle = '#fbbf24';
+          ctx.textAlign = 'center';
+          ctx.fillText(s.server === 'player' ? 'CLICK TO SERVE' : (gameMode === '2p' ? 'P2: ENTER TO SERVE' : 'CPU SERVING...'), W / 2, H - 15);
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      // Swing ready glow
+      if (s.swingReadyTimer > 0 && s.ballActive) {
+        const pulse = 0.4 + 0.4 * Math.sin(Date.now() / 80);
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = s.swingReadyTimer <= 5 ? '#fbbf24' : '#22c55e';
+        ctx.beginPath();
+        ctx.arc(s.playerX, s.playerY, 28, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Swing quality text
+      if (s.swingQualityTimer > 0) {
+        const alpha = Math.min(1, s.swingQualityTimer / 15);
+        ctx.globalAlpha = alpha;
+        ctx.font = `bold ${s.swingQuality === 'PERFECT!' ? 22 : 15}px sans-serif`;
+        ctx.fillStyle = s.swingQuality === 'PERFECT!' ? '#fbbf24' : s.swingQuality === 'EARLY' ? '#94a3b8' : '#a3e635';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'center';
+        ctx.strokeText(s.swingQuality, s.playerX, s.playerY - 45);
+        ctx.fillText(s.swingQuality, s.playerX, s.playerY - 45);
         ctx.globalAlpha = 1;
       }
 
@@ -2995,7 +3454,7 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
         ctx.fillText(`Sets: ${s.playerSets} (${p1Label}) - ${s.cpuSets} (${p2Label})`, W / 2, H * 0.5);
         ctx.font = '13px sans-serif';
         ctx.fillStyle = '#ccc';
-        ctx.fillText('Click to continue', W / 2, H * 0.62);
+        ctx.fillText('Use buttons below', W / 2, H * 0.62);
       }
 
       // (controls shown via mobile buttons - no overlay)
@@ -3029,20 +3488,16 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
       canvas.removeEventListener('touchmove', handleTouch);
       canvas.removeEventListener('click', handleClick);
     };
-  }, [cpuSkill, gameMode, p1Label, p2Label]);
+  }, [cpuSkill, gameMode, p1Label, p2Label, gameKey]);
 
   const doSwing = () => {
     const s = stateRef.current;
-    if (!s) return;
-    if (s.matchOver) { onExit(); return; }
-    if (s.serving && s.server === 'player' && s.serveTimer <= 0) {
-      // Trigger serve via keys
-      s.keys.add(' ');
-      setTimeout(() => s.keys.delete(' '), 50);
-    } else {
-      s.keys.add(' ');
-      setTimeout(() => s.keys.delete(' '), 50);
-    }
+    if (!s || s.matchOver) return;
+    // Dispatch click to canvas — handles both serve (with power) and swing
+    canvasRef.current?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // Also add space key for keyboard-based swing detection
+    s.keys.add(' ');
+    setTimeout(() => stateRef.current?.keys.delete(' '), 80);
   };
 
   const doMove = (dir: 'left' | 'right' | 'up' | 'down') => {
@@ -3068,10 +3523,19 @@ function Tennis({ difficulty, gameMode, onExit }: { difficulty: Difficulty; game
           <button onPointerDown={() => doMove('down')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">↓ Back</button>
           <button onPointerDown={() => doMove('right')} className="px-3 py-2 bg-gray-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Move →</button>
         </div>
-        <div className="flex gap-1.5 justify-center">
+        <div className="flex gap-1.5 justify-center flex-wrap">
           <button onPointerDown={() => { const s = stateRef.current; if (s) s.keys.add('w'); setTimeout(() => stateRef.current?.keys.delete('w'), 200); doSwing(); }} className="px-5 py-2 bg-cyan-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Lob</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'flat'; }} className="px-3 py-2 bg-slate-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Flat</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'topspin'; }} className="px-3 py-2 bg-orange-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Topspin</button>
+          <button onPointerDown={() => { const s = stateRef.current; if (s) s.spinType = 'slice'; }} className="px-3 py-2 bg-purple-500 text-white font-bold rounded-lg active:scale-90 text-xs shadow-lg">Slice</button>
         </div>
       </div>
+      {tick >= 0 && stateRef.current?.matchOver && (
+        <div className="bg-black/40 rounded-2xl px-4 py-3 text-center w-full max-w-[600px] flex gap-2 justify-center">
+          <button onClick={() => setGameKey(k => k + 1)} className="px-6 py-2 bg-yellow-400 text-black rounded-xl font-bold hover:bg-yellow-300 active:scale-95 transition-all">Play Again</button>
+          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 active:scale-95 transition-all">Back</button>
+        </div>
+      )}
       <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
     </div>
   );
@@ -3090,7 +3554,8 @@ interface GolfHole {
 function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
-  const [, forceUpdate] = useState(0);
+  const [tick, forceUpdate] = useState(0);
+  const [gameKey, setGameKey] = useState(0);
 
   const W = 600, H = 440;
   const maxHoles = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 6 : 9;
@@ -3324,6 +3789,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
             s.matchOver = true;
             s.message = 'Course Complete!';
             s.messageTimer = 200;
+            forceUpdate(n => n + 1);
             return;
           }
           initHole(s.holeIndex + 1, 1);
@@ -3334,6 +3800,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
           s.matchOver = true;
           s.message = 'Course Complete!';
           s.messageTimer = 200;
+          forceUpdate(n => n + 1);
           return;
         }
         initHole(s.holeIndex + 1);
@@ -3448,6 +3915,11 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
 
           // Check water
           if (isInWater(s.ballX, s.ballY, hole)) {
+            // Water splash particles
+            for (let i = 0; i < 16; i++) {
+              s.particles.push({ x: s.ballX, y: s.ballY, vx: (Math.random() - 0.5) * 3.5, vy: -Math.random() * 4 - 1, life: 18 + Math.random() * 12, color: i % 3 === 0 ? '#93c5fd' : '#60a5fa' });
+            }
+            s.shotDistance = Math.sqrt((s.ballX - s.lastBallX) ** 2 + (s.ballY - s.lastBallY) ** 2);
             s.ballX = s.lastBallX;
             s.ballY = s.lastBallY;
             s.ballMoving = false;
@@ -3461,6 +3933,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
 
           // Check OB
           if (s.ballX < 10 || s.ballX > W - 10 || s.ballY < 10 || s.ballY > H - 10) {
+            s.shotDistance = Math.sqrt((s.ballX - s.lastBallX) ** 2 + (s.ballY - s.lastBallY) ** 2);
             s.ballX = s.lastBallX;
             s.ballY = s.lastBallY;
             s.ballMoving = false;
@@ -3480,9 +3953,18 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
             s.ballInHole = true;
             s.ballX = hole.holeX;
             s.ballY = hole.holeY;
+            s.shotDistance = Math.sqrt((s.ballX - s.lastBallX) ** 2 + (s.ballY - s.lastBallY) ** 2);
             s.message = getScoreName(s.strokes, hole.par);
             s.messageTimer = 120;
             s.powerPhase = 'done';
+            // Celebration particles for eagle or better
+            if (s.strokes <= hole.par - 1) {
+              const count = s.strokes === 1 ? 40 : 25;
+              const colors = ['#fbbf24', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f472b6'];
+              for (let i = 0; i < count; i++) {
+                s.particles.push({ x: hole.holeX, y: hole.holeY, vx: (Math.random() - 0.5) * 8, vy: -Math.random() * 6 - 2, life: 30 + Math.random() * 25, color: colors[Math.floor(Math.random() * colors.length)] });
+              }
+            }
             return;
           }
 
@@ -3509,6 +3991,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
             // Ball stopped
             s.ballMoving = false;
             s.powerPhase = 'aim';
+            s.shotDistance = Math.sqrt((s.ballX - s.lastBallX) ** 2 + (s.ballY - s.lastBallY) ** 2);
             s.ballTrail = [];
             s.lastBallX = s.ballX;
             s.lastBallY = s.ballY;
@@ -3578,6 +4061,22 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
       ctx.beginPath();
       ctx.ellipse(hole.holeX, hole.holeY, 35, 30, 0, 0, Math.PI * 2);
       ctx.fill();
+      // Putting grid (subtle)
+      if (s.puttingMode || s.distToHole < 55) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(hole.holeX, hole.holeY, 35, 30, 0, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 0.5;
+        for (let gx = hole.holeX - 36; gx <= hole.holeX + 36; gx += 7) {
+          ctx.beginPath(); ctx.moveTo(gx, hole.holeY - 31); ctx.lineTo(gx, hole.holeY + 31); ctx.stroke();
+        }
+        for (let gy = hole.holeY - 31; gy <= hole.holeY + 31; gy += 7) {
+          ctx.beginPath(); ctx.moveTo(hole.holeX - 36, gy); ctx.lineTo(hole.holeX + 36, gy); ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       // Bunkers
       for (const b of hole.bunkers) {
@@ -3716,6 +4215,28 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
         ctx.lineTo(endX - 8 * Math.cos(arrowAngle - 0.4), endY - 8 * Math.sin(arrowAngle - 0.4));
         ctx.lineTo(endX - 8 * Math.cos(arrowAngle + 0.4), endY - 8 * Math.sin(arrowAngle + 0.4));
         ctx.fill();
+
+        // Predicted landing zone (pulsing circle)
+        if (s.powerPhase === 'aim') {
+          const maxDist = club.power * 11;
+          const landX = s.ballX + Math.cos(s.aimAngle) * maxDist;
+          const landY = s.ballY + Math.sin(s.aimAngle) * maxDist;
+          const pulse = 0.3 + 0.2 * Math.sin(Date.now() / 300);
+          ctx.globalAlpha = pulse;
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.arc(landX, landY, 10, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          // "Max" label
+          ctx.font = '8px sans-serif';
+          ctx.fillStyle = 'rgba(251,191,36,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('MAX', landX, landY + 18);
+        }
       }
     }
 
@@ -3767,7 +4288,19 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
       ctx.font = '9px sans-serif';
       ctx.fillText(`${s.windSpeed.toFixed(1)} mph`, W * 0.55, 38);
 
-      // Club + Distance
+      // Running score vs par (completed holes)
+      if (s.scorecard.length > 0 || s.strokes > 0) {
+        const completedTotal = s.scorecard.reduce((a: number, b: number) => a + b, 0);
+        const completedPar = HOLES.slice(0, s.scorecard.length).reduce((a: number, h: GolfHole) => a + h.par, 0);
+        const diff = completedTotal - completedPar;
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = diff < 0 ? '#22c55e' : diff === 0 ? '#fbbf24' : '#ef4444';
+        const label = diff === 0 ? 'E' : `${diff > 0 ? '+' : ''}${diff}`;
+        ctx.fillText(label, W * 0.42, 32);
+      }
+
+      // Club + Distance + Terrain
       ctx.textAlign = 'right';
       ctx.fillStyle = '#fbbf24';
       ctx.font = 'bold 13px sans-serif';
@@ -3775,6 +4308,14 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
       ctx.fillText(`${Math.round(s.distToHole)} yds`, W - 12, 32);
+      // Terrain label
+      if (!s.ballMoving && s.terrain) {
+        const terrainColors: Record<string, string> = { tee: '#a3e635', fairway: '#4ade80', rough: '#dc2626', bunker: '#f4d794', green: '#6ee7b7' };
+        const tLabel = s.distToHole < 40 ? 'green' : s.terrain;
+        ctx.fillStyle = terrainColors[tLabel] || '#aaa';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(tLabel.toUpperCase(), W - 12, 38);
+      }
 
       // Power meter
       if (s.powerPhase === 'charging' || s.powerPhase === 'swinging') {
@@ -3849,7 +4390,13 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
         ctx.fillText('ACCURACY', meterX - 5, meterY - 10);
       }
 
-      // (controls shown via mobile buttons - no instruction overlay)
+      // Shot distance display
+      if (!s.ballMoving && s.shotDistance > 5 && s.powerPhase === 'aim') {
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText(`Last shot: ${Math.round(s.shotDistance)} yds`, W / 2, H - 12);
+      }
 
       // Message
       if (s.messageTimer > 0) {
@@ -3962,7 +4509,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
 
         ctx.font = '13px sans-serif';
         ctx.fillStyle = '#ccc';
-        ctx.fillText('Click to continue', W / 2, startY + rowH * 5 + 10);
+        ctx.fillText('Use buttons below', W / 2, startY + rowH * 5 + 10);
       }
     }
 
@@ -3999,7 +4546,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
       window.removeEventListener('keydown', handleKey);
       canvas.removeEventListener('click', handleClick);
     };
-  }, [maxHoles, gameMode]);
+  }, [maxHoles, gameMode, gameKey]);
 
   // Mobile controls
   const btnClass = "px-3 py-2 font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg";
@@ -4016,8 +4563,7 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
 
   const doAction = () => {
     const s = stateRef.current;
-    if (!s) return;
-    if (s.matchOver) { onExit(); return; }
+    if (!s || s.matchOver) return;
     if (s.ballInHole) {
       // Trigger next hole by simulating enter key
       const evt = new KeyboardEvent('keydown', { key: 'Enter' });
@@ -4041,6 +4587,12 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
           <button onPointerDown={() => doClub(1)} className={`${btnClass} bg-yellow-600 text-white`}>Club ↓</button>
         </div>
       </div>
+      {tick >= 0 && stateRef.current?.matchOver && (
+        <div className="bg-black/40 rounded-2xl px-4 py-3 text-center w-full max-w-[600px] flex gap-2 justify-center">
+          <button onClick={() => setGameKey(k => k + 1)} className="px-6 py-2 bg-yellow-400 text-black rounded-xl font-bold hover:bg-yellow-300 active:scale-95 transition-all">Play Again</button>
+          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 active:scale-95 transition-all">Back</button>
+        </div>
+      )}
       <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">← Back</button>
     </div>
   );
@@ -4049,77 +4601,132 @@ function Golf({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMo
 // ═══════ SNAKE ═══════
 function SnakeGame({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [score, setScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
   const dirRef = useRef({ x: 1, y: 0 });
-  const stateRef = useRef({ snake: [{ x: 5, y: 5 }], food: { x: 10, y: 10 }, running: true });
+  const nextDirRef = useRef({ x: 1, y: 0 });
+  const [gameKey, setGameKey] = useState(0);
+  const [phase, setPhase] = useState<'playing' | 'over'>('playing');
+  const [highScore, setHighScore] = useState(0);
+
+  useEffect(() => {
+    try { setHighScore(parseInt(localStorage.getItem('snake_hs') || '0')); } catch { /**/ }
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    const GRID = 20, COLS = 20, ROWS = 20;
-    canvas.width = COLS * GRID; canvas.height = ROWS * GRID;
-    const s = stateRef.current;
-    s.snake = [{ x: 5, y: 5 }]; s.food = { x: 10, y: 10 }; s.running = true;
+    const CELL = 16, C = 20, R = 20;
+    canvas.width = C * CELL; canvas.height = R * CELL;
     dirRef.current = { x: 1, y: 0 };
+    nextDirRef.current = { x: 1, y: 0 };
 
-    const placeFood = () => {
-      s.food = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+    let snake = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+    let score = 0, running = true;
+
+    const getFood = (): { x: number; y: number } => {
+      let p: { x: number; y: number };
+      do { p = { x: Math.floor(Math.random() * C), y: Math.floor(Math.random() * R) }; }
+      while (snake.some(s => s.x === p.x && s.y === p.y));
+      return p;
     };
+    let food = getFood();
 
-    const handler = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       const d = dirRef.current;
-      if (e.key === 'ArrowUp' && d.y !== 1) dirRef.current = { x: 0, y: -1 };
-      if (e.key === 'ArrowDown' && d.y !== -1) dirRef.current = { x: 0, y: 1 };
-      if (e.key === 'ArrowLeft' && d.x !== 1) dirRef.current = { x: -1, y: 0 };
-      if (e.key === 'ArrowRight' && d.x !== -1) dirRef.current = { x: 1, y: 0 };
+      if (e.key === 'ArrowUp' && d.y !== 1) nextDirRef.current = { x: 0, y: -1 };
+      if (e.key === 'ArrowDown' && d.y !== -1) nextDirRef.current = { x: 0, y: 1 };
+      if (e.key === 'ArrowLeft' && d.x !== 1) nextDirRef.current = { x: -1, y: 0 };
+      if (e.key === 'ArrowRight' && d.x !== -1) nextDirRef.current = { x: 1, y: 0 };
     };
-    window.addEventListener('keydown', handler);
+    window.addEventListener('keydown', onKey);
 
-    const interval = setInterval(() => {
-      if (!s.running) return;
-      const head = { x: s.snake[0].x + dirRef.current.x, y: s.snake[0].y + dirRef.current.y };
-      if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS || s.snake.some(seg => seg.x === head.x && seg.y === head.y)) {
-        s.running = false; setGameOver(true); return;
-      }
-      s.snake.unshift(head);
-      if (head.x === s.food.x && head.y === s.food.y) { setScore(sc => sc + 1); placeFood(); }
-      else s.snake.pop();
+    let timer: ReturnType<typeof setTimeout>;
 
-      // Draw
-      ctx.fillStyle = '#111'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#22c55e';
-      s.snake.forEach((seg, i) => {
-        ctx.globalAlpha = 1 - i * 0.02;
-        ctx.fillRect(seg.x * GRID + 1, seg.y * GRID + 1, GRID - 2, GRID - 2);
+    const rr = (x: number, y: number, w: number, h: number, r: number) => {
+      ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+    };
+
+    const render = () => {
+      const W = canvas.width, H = canvas.height;
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 0.5;
+      for (let i = 0; i <= C; i++) { ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, H); ctx.stroke(); }
+      for (let i = 0; i <= R; i++) { ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(W, i * CELL); ctx.stroke(); }
+      const g = ctx.createRadialGradient(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, 0, food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, CELL * 2);
+      g.addColorStop(0, 'rgba(239,68,68,0.4)'); g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g; ctx.fillRect((food.x - 1) * CELL, (food.y - 1) * CELL, CELL * 3, CELL * 3);
+      ctx.fillStyle = '#ef4444'; rr(food.x * CELL + 2, food.y * CELL + 2, CELL - 4, CELL - 4, 5);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; rr(food.x * CELL + 4, food.y * CELL + 3, 4, 3, 2);
+      snake.forEach((seg, i) => {
+        const t = 1 - i / snake.length;
+        ctx.fillStyle = i === 0 ? '#4ade80' : `rgba(34,197,94,${Math.max(0.2, t * 0.9)})`;
+        const p = i === 0 ? 1 : 2;
+        rr(seg.x * CELL + p, seg.y * CELL + p, CELL - p * 2, CELL - p * 2, i === 0 ? 5 : 3);
       });
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(s.food.x * GRID + 2, s.food.y * GRID + 2, GRID - 4, GRID - 4);
-    }, 120);
+      const hd = snake[0], dv = dirRef.current;
+      const ex = hd.x * CELL + CELL / 2 + dv.x * 3.5, ey = hd.y * CELL + CELL / 2 + dv.y * 3.5;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#065f46'; ctx.beginPath(); ctx.arc(ex + dv.x, ey + dv.y, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, 20);
+      ctx.font = 'bold 11px Arial'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#e2e8f0'; ctx.fillText(`Score: ${score}`, 6, 14);
+      const hs = parseInt(localStorage.getItem('snake_hs') || '0');
+      ctx.textAlign = 'right'; ctx.fillStyle = '#fbbf24'; ctx.fillText(`Best: ${hs}`, W - 6, 14);
+    };
 
-    return () => { clearInterval(interval); window.removeEventListener('keydown', handler); };
-  }, []);
+    const tick = () => {
+      if (!running) return;
+      dirRef.current = { ...nextDirRef.current };
+      const d = dirRef.current;
+      const head = { x: snake[0].x + d.x, y: snake[0].y + d.y };
+      if (head.x < 0 || head.x >= C || head.y < 0 || head.y >= R || snake.some(s => s.x === head.x && s.y === head.y)) {
+        running = false; render();
+        ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 26px Arial'; ctx.fillStyle = '#fff'; ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 16);
+        ctx.font = 'bold 16px Arial'; ctx.fillText(`Score: ${score}`, canvas.width / 2, canvas.height / 2 + 12);
+        const prev = parseInt(localStorage.getItem('snake_hs') || '0');
+        if (score > prev) {
+          localStorage.setItem('snake_hs', String(score)); setHighScore(score);
+          ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 13px Arial';
+          ctx.fillText('New High Score! 🏆', canvas.width / 2, canvas.height / 2 + 38);
+        }
+        setPhase('over'); return;
+      }
+      snake.unshift(head);
+      if (head.x === food.x && head.y === food.y) { score++; food = getFood(); }
+      else snake.pop();
+      render();
+      timer = setTimeout(tick, Math.max(70, 150 - Math.floor(score / 5) * 10));
+    };
+
+    tick();
+    return () => { clearTimeout(timer); window.removeEventListener('keydown', onKey); };
+  }, [gameKey]);
+
+  const setDir = (x: number, y: number) => {
+    const d = dirRef.current;
+    if (x === -d.x && y === -d.y) return;
+    nextDirRef.current = { x, y };
+  };
 
   return (
     <div className="flex flex-col items-center gap-3 p-4">
-      <p className="text-white font-bold">🐍 Snake — Score: {score}</p>
-      <canvas ref={canvasRef} className="rounded-xl shadow-lg" style={{ width: 320, height: 320 }} />
-      <p className="text-white/50 text-xs">Use arrow keys to move</p>
-      {/* Mobile controls */}
-      <div className="grid grid-cols-3 gap-1 md:hidden w-36">
-        <div />
-        <button onClick={() => { if (dirRef.current.y !== 1) dirRef.current = { x: 0, y: -1 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">↑</button>
-        <div />
-        <button onClick={() => { if (dirRef.current.x !== 1) dirRef.current = { x: -1, y: 0 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">←</button>
-        <button onClick={() => { if (dirRef.current.y !== -1) dirRef.current = { x: 0, y: 1 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">↓</button>
-        <button onClick={() => { if (dirRef.current.x !== -1) dirRef.current = { x: 1, y: 0 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">→</button>
+      <div className="flex items-center justify-between w-full max-w-[320px]">
+        <p className="text-white font-bold text-sm">🐍 Snake</p>
+        <p className="text-yellow-300 font-bold text-sm">Best: {highScore}</p>
       </div>
-      {gameOver && (
-        <div className="text-center space-y-2">
-          <p className="text-red-400 font-bold">Game Over! Score: {score}</p>
-          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30">Back to Arcade</button>
+      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[320px]" style={{ aspectRatio: '1' }} />
+      <div className="grid grid-cols-3 gap-1.5 w-40">
+        <div /><button onPointerDown={() => setDir(0, -1)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">↑</button><div />
+        <button onPointerDown={() => setDir(-1, 0)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">←</button>
+        <button onPointerDown={() => setDir(0, 1)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">↓</button>
+        <button onPointerDown={() => setDir(1, 0)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">→</button>
+      </div>
+      {phase === 'over' && (
+        <div className="flex gap-3">
+          <button onClick={() => { setPhase('playing'); setGameKey(k => k + 1); }} className="px-5 py-2 bg-green-500 text-white rounded-xl font-bold text-sm shadow">Play Again</button>
+          <button onClick={onExit} className="px-5 py-2 bg-white/20 text-white rounded-xl font-bold text-sm">Back</button>
         </div>
       )}
     </div>
@@ -4129,18 +4736,26 @@ function SnakeGame({ onExit }: { onExit: () => void }) {
 // ═══════ PAC-MAN ═══════
 function PacManGame({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [score, setScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
-  const dirRef = useRef({ x: 1, y: 0 });
+  const pacDirRef = useRef({ x: 1, y: 0 });
+  const pacNextRef = useRef({ x: 1, y: 0 });
+  const [gameKey, setGameKey] = useState(0);
+  const [phase, setPhase] = useState<'playing' | 'over' | 'won'>('playing');
+  const [highScore, setHighScore] = useState(0);
+
+  useEffect(() => {
+    try { setHighScore(parseInt(localStorage.getItem('pac_hs') || '0')); } catch { /**/ }
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    const GRID = 20, COLS = 20, ROWS = 20;
-    canvas.width = COLS * GRID; canvas.height = ROWS * GRID;
+    const CELL = 16, COLS = 20, ROWS = 20;
+    canvas.width = COLS * CELL; canvas.height = ROWS * CELL;
+    pacDirRef.current = { x: 1, y: 0 };
+    pacNextRef.current = { x: 1, y: 0 };
 
-    // Simple maze - 0 = path, 1 = wall
+    // 0=dot 1=wall 4=power pellet
     const maze: number[][] = Array.from({ length: ROWS }, (_, r) =>
       Array.from({ length: COLS }, (_, c) => {
         if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) return 1;
@@ -4148,120 +4763,198 @@ function PacManGame({ onExit }: { onExit: () => void }) {
         return 0;
       })
     );
+    [[1, 3], [18, 3], [1, 16], [18, 16]].forEach(([x, y]) => { if (maze[y][x] === 0) maze[y][x] = 4; });
 
-    const dots: boolean[][] = maze.map(row => row.map(cell => cell === 0));
+    const dots: boolean[][] = maze.map(row => row.map(c => c === 0 || c === 4));
+    const pellets: boolean[][] = maze.map(row => row.map(c => c === 4));
     let totalDots = dots.flat().filter(Boolean).length;
-    const pac = { x: 1, y: 1 };
-    const ghosts = [
-      { x: 18, y: 1, color: '#ff0000', dx: 0, dy: 1 },
-      { x: 1, y: 18, color: '#00ffff', dx: 1, dy: 0 },
-      { x: 18, y: 18, color: '#ffb8ff', dx: -1, dy: 0 },
-      { x: 10, y: 10, color: '#ffb852', dx: 0, dy: -1 },
+    let score = 0, lives = 3, frighten = 0, frame = 0, running = true;
+
+    const PAC0 = { x: 10, y: 16 };
+    const GDEFS = [
+      { x: 8,  y: 9, color: '#ff0000' }, { x: 10, y: 9, color: '#ffb8de' },
+      { x: 12, y: 9, color: '#00ffff' }, { x: 9,  y: 12, color: '#ffb852' },
     ];
+    type Ghost = { x: number; y: number; color: string; dx: number; dy: number; eaten: boolean };
+    let pac = { ...PAC0 };
+    let ghosts: Ghost[] = GDEFS.map(g => ({ ...g, dx: 0, dy: -1, eaten: false }));
 
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp') dirRef.current = { x: 0, y: -1 };
-      if (e.key === 'ArrowDown') dirRef.current = { x: 0, y: 1 };
-      if (e.key === 'ArrowLeft') dirRef.current = { x: -1, y: 0 };
-      if (e.key === 'ArrowRight') dirRef.current = { x: 1, y: 0 };
+    const passable = (x: number, y: number) => x >= 0 && x < COLS && y >= 0 && y < ROWS && maze[y][x] !== 1;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp') pacNextRef.current = { x: 0, y: -1 };
+      if (e.key === 'ArrowDown') pacNextRef.current = { x: 0, y: 1 };
+      if (e.key === 'ArrowLeft') pacNextRef.current = { x: -1, y: 0 };
+      if (e.key === 'ArrowRight') pacNextRef.current = { x: 1, y: 0 };
     };
-    window.addEventListener('keydown', handler);
+    window.addEventListener('keydown', onKey);
 
-    let running = true;
-    const interval = setInterval(() => {
+    const drawGhost = (gx: number, gy: number, color: string, scared: boolean, flash: boolean) => {
+      const px = gx * CELL, py = gy * CELL, r = CELL / 2 - 1;
+      ctx.fillStyle = scared ? (flash ? '#fff' : '#2233cc') : color;
+      ctx.beginPath();
+      ctx.arc(px + CELL / 2, py + r + 1, r, Math.PI, 0);
+      ctx.lineTo(px + CELL - 1, py + CELL - 1);
+      const bumps = 3, bw = (CELL - 2) / bumps;
+      for (let b = bumps - 1; b >= 0; b--) ctx.arc(px + 1 + bw * b + bw / 2, py + CELL - 1, bw / 2, 0, Math.PI, true);
+      ctx.lineTo(px + 1, py + r + 1);
+      ctx.fill();
+      if (!scared) {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(px + 5, py + 7, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(px + 11, py + 7, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#00f';
+        ctx.beginPath(); ctx.arc(px + 6, py + 8, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(px + 12, py + 8, 1.5, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = flash ? '#00f' : '#fff';
+        ctx.fillRect(px + 4, py + 7, 3, 2); ctx.fillRect(px + 10, py + 7, 3, 2);
+      }
+    };
+
+    const render = () => {
+      const W = canvas.width, H = canvas.height;
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+      maze.forEach((row, r) => row.forEach((cell, c) => {
+        if (cell !== 1) return;
+        ctx.fillStyle = '#1a3a8e'; ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+        ctx.strokeStyle = '#2a4aae'; ctx.lineWidth = 1;
+        ctx.strokeRect(c * CELL + 0.5, r * CELL + 0.5, CELL - 1, CELL - 1);
+      }));
+      dots.forEach((row, r) => row.forEach((dot, c) => {
+        if (!dot) return;
+        if (pellets[r][c]) {
+          ctx.fillStyle = `rgba(255,255,100,${0.6 + 0.4 * Math.sin(frame * 0.2)})`;
+          ctx.beginPath(); ctx.arc(c * CELL + CELL / 2, r * CELL + CELL / 2, 4.5, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.fillStyle = '#ffb8de';
+          ctx.beginPath(); ctx.arc(c * CELL + CELL / 2, r * CELL + CELL / 2, 2, 0, Math.PI * 2); ctx.fill();
+        }
+      }));
+      const flash = frighten > 0 && frighten < 12 && frame % 4 < 2;
+      ghosts.forEach(g => { if (!g.eaten) drawGhost(g.x, g.y, g.color, frighten > 0, flash); });
+      const mouth = Math.abs(Math.sin(frame * 0.35)) * 0.45;
+      const ang = Math.atan2(pacDirRef.current.y, pacDirRef.current.x);
+      ctx.fillStyle = '#ffff00';
+      ctx.beginPath();
+      ctx.arc(pac.x * CELL + CELL / 2, pac.y * CELL + CELL / 2, CELL / 2 - 1, ang + mouth, ang + Math.PI * 2 - mouth);
+      ctx.lineTo(pac.x * CELL + CELL / 2, pac.y * CELL + CELL / 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, 20);
+      ctx.font = 'bold 11px Arial'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#fff'; ctx.fillText(`Score: ${score}`, 6, 14);
+      ctx.textAlign = 'right'; ctx.fillStyle = '#fbbf24';
+      ctx.fillText(`Best: ${parseInt(localStorage.getItem('pac_hs') || '0')}`, W - 6, 14);
+      for (let i = 0; i < lives; i++) {
+        ctx.fillStyle = '#ffff00'; ctx.beginPath();
+        ctx.arc(8 + i * 14, H - 10, 5, 0.4, Math.PI * 2 - 0.4); ctx.lineTo(8 + i * 14, H - 10); ctx.fill();
+      }
+      if (frighten > 0) { ctx.fillStyle = 'rgba(0,0,200,0.08)'; ctx.fillRect(0, 20, W, H - 40); }
+    };
+
+    const respawn = () => {
+      pac = { ...PAC0 };
+      pacDirRef.current = { x: 1, y: 0 }; pacNextRef.current = { x: 1, y: 0 };
+      ghosts = GDEFS.map(g => ({ ...g, dx: 0, dy: -1, eaten: false }));
+      frighten = 0;
+    };
+
+    const showEndOverlay = (won: boolean) => {
+      ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 24px Arial';
+      ctx.fillStyle = won ? '#4ade80' : '#ef4444';
+      ctx.fillText(won ? 'YOU WIN! 🎉' : 'GAME OVER', canvas.width / 2, canvas.height / 2 - 16);
+      ctx.font = 'bold 16px Arial'; ctx.fillStyle = '#fff';
+      ctx.fillText(`Score: ${score}`, canvas.width / 2, canvas.height / 2 + 12);
+      const prev = parseInt(localStorage.getItem('pac_hs') || '0');
+      if (score > prev) {
+        localStorage.setItem('pac_hs', String(score)); setHighScore(score);
+        ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 13px Arial';
+        ctx.fillText('New High Score! 🏆', canvas.width / 2, canvas.height / 2 + 38);
+      }
+    };
+
+    let timer: ReturnType<typeof setTimeout>;
+
+    const tick = () => {
       if (!running) return;
+      frame++; if (frighten > 0) frighten--;
 
-      // Move pac
-      const nx = pac.x + dirRef.current.x, ny = pac.y + dirRef.current.y;
-      if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && maze[ny][nx] === 0) {
-        pac.x = nx; pac.y = ny;
+      const nd = pacNextRef.current;
+      const nx = pac.x + nd.x, ny = pac.y + nd.y;
+      if (passable(nx, ny)) { pacDirRef.current = { ...nd }; pac.x = nx; pac.y = ny; }
+      else {
+        const cd = pacDirRef.current;
+        const cx = pac.x + cd.x, cy = pac.y + cd.y;
+        if (passable(cx, cy)) { pac.x = cx; pac.y = cy; }
       }
-      // Eat dot
-      if (dots[pac.y][pac.x]) {
-        dots[pac.y][pac.x] = false;
-        totalDots--;
-        setScore(s => s + 10);
-        if (totalDots <= 0) { running = false; setGameOver(true); }
+
+      if (dots[pac.y]?.[pac.x]) {
+        dots[pac.y][pac.x] = false; totalDots--;
+        if (pellets[pac.y][pac.x]) { pellets[pac.y][pac.x] = false; frighten = 40; score += 50; }
+        else score += 10;
+        if (totalDots <= 0) {
+          running = false; render(); showEndOverlay(true); setPhase('won'); return;
+        }
       }
-      // Move ghosts
+
       ghosts.forEach(g => {
-        // Simple AI: sometimes chase, sometimes random
-        if (Math.random() < 0.3) {
+        if (g.eaten) return;
+        if (Math.random() < 0.35) {
           const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
-          const valid = dirs.filter(d => {
-            const gx = g.x + d.x, gy = g.y + d.y;
-            return gx >= 0 && gx < COLS && gy >= 0 && gy < ROWS && maze[gy][gx] === 0;
-          });
+          const valid = dirs.filter(d => passable(g.x + d.x, g.y + d.y) && !(d.x === -g.dx && d.y === -g.dy));
           if (valid.length) {
-            // Chase pac sometimes
-            if (Math.random() < 0.5) {
-              valid.sort((a, b) => {
-                const da = Math.abs(pac.x - (g.x + a.x)) + Math.abs(pac.y - (g.y + a.y));
-                const db = Math.abs(pac.x - (g.x + b.x)) + Math.abs(pac.y - (g.y + b.y));
-                return da - db;
-              });
-            }
-            const chosen = valid[0];
-            g.dx = chosen.x; g.dy = chosen.y;
+            valid.sort((a, b) => {
+              const ta = Math.abs(pac.x - (g.x + a.x)) + Math.abs(pac.y - (g.y + a.y));
+              const tb = Math.abs(pac.x - (g.x + b.x)) + Math.abs(pac.y - (g.y + b.y));
+              return frighten > 0 ? tb - ta : ta - tb;
+            });
+            if (Math.random() > (frighten > 0 ? 0.9 : 0.5)) valid.sort(() => Math.random() - 0.5);
+            g.dx = valid[0].x; g.dy = valid[0].y;
           }
         }
         const gnx = g.x + g.dx, gny = g.y + g.dy;
-        if (gnx >= 0 && gnx < COLS && gny >= 0 && gny < ROWS && maze[gny][gnx] === 0) {
-          g.x = gnx; g.y = gny;
-        } else { g.dx *= -1; g.dy *= -1; }
+        if (passable(gnx, gny)) { g.x = gnx; g.y = gny; } else { g.dx = -g.dx; g.dy = -g.dy; }
       });
-      // Ghost collision
-      if (ghosts.some(g => g.x === pac.x && g.y === pac.y)) { running = false; setGameOver(true); }
 
-      // Draw
-      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // Walls
-      maze.forEach((row, r) => row.forEach((cell, c) => {
-        if (cell === 1) { ctx.fillStyle = '#1a1a8e'; ctx.fillRect(c * GRID, r * GRID, GRID, GRID); }
-      }));
-      // Dots
-      dots.forEach((row, r) => row.forEach((dot, c) => {
-        if (dot) { ctx.fillStyle = '#ffb8ff'; ctx.beginPath(); ctx.arc(c * GRID + GRID / 2, r * GRID + GRID / 2, 2.5, 0, Math.PI * 2); ctx.fill(); }
-      }));
-      // Pac-Man
-      ctx.fillStyle = '#ffff00';
-      ctx.beginPath();
-      const mouthAngle = 0.3;
-      const angle = Math.atan2(dirRef.current.y, dirRef.current.x);
-      ctx.arc(pac.x * GRID + GRID / 2, pac.y * GRID + GRID / 2, GRID / 2 - 2, angle + mouthAngle, angle + Math.PI * 2 - mouthAngle);
-      ctx.lineTo(pac.x * GRID + GRID / 2, pac.y * GRID + GRID / 2);
-      ctx.fill();
-      // Ghosts
       ghosts.forEach(g => {
-        ctx.fillStyle = g.color;
-        ctx.fillRect(g.x * GRID + 2, g.y * GRID + 2, GRID - 4, GRID - 4);
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(g.x * GRID + 5, g.y * GRID + 5, 4, 4);
-        ctx.fillRect(g.x * GRID + 11, g.y * GRID + 5, 4, 4);
+        if (g.eaten || g.x !== pac.x || g.y !== pac.y) return;
+        if (frighten > 0) { g.eaten = true; score += 200; }
+        else {
+          lives--;
+          if (lives <= 0) { running = false; render(); showEndOverlay(false); setPhase('over'); }
+          else respawn();
+        }
       });
-    }, 150);
 
-    return () => { clearInterval(interval); window.removeEventListener('keydown', handler); };
-  }, []);
+      render();
+      timer = setTimeout(tick, 140);
+    };
+
+    tick();
+    return () => { clearTimeout(timer); window.removeEventListener('keydown', onKey); };
+  }, [gameKey]);
+
+  const setDir = (x: number, y: number) => { pacNextRef.current = { x, y }; };
 
   return (
     <div className="flex flex-col items-center gap-3 p-4">
-      <p className="text-white font-bold">PAC-MAN — Score: {score}</p>
-      <canvas ref={canvasRef} className="rounded-xl shadow-lg" style={{ width: 320, height: 320 }} />
-      <p className="text-white/50 text-xs">Use arrow keys to move</p>
-      {/* Mobile controls */}
-      <div className="grid grid-cols-3 gap-1 md:hidden w-36">
-        <div />
-        <button onClick={() => { dirRef.current = { x: 0, y: -1 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">↑</button>
-        <div />
-        <button onClick={() => { dirRef.current = { x: -1, y: 0 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">←</button>
-        <button onClick={() => { dirRef.current = { x: 0, y: 1 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">↓</button>
-        <button onClick={() => { dirRef.current = { x: 1, y: 0 }; }} className="bg-white/20 text-white rounded-lg py-2 text-center font-bold">→</button>
+      <div className="flex items-center justify-between w-full max-w-[320px]">
+        <p className="text-white font-bold text-sm">👻 Pac-Man</p>
+        <p className="text-yellow-300 font-bold text-sm">Best: {highScore}</p>
       </div>
-      {gameOver && (
-        <div className="text-center space-y-2">
-          <p className="text-yellow-300 font-bold">{score > 500 ? 'Great run!' : 'Game Over!'} Score: {score}</p>
-          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30">Back to Arcade</button>
+      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[320px]" style={{ aspectRatio: '1' }} />
+      <div className="grid grid-cols-3 gap-1.5 w-40">
+        <div /><button onPointerDown={() => setDir(0, -1)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">↑</button><div />
+        <button onPointerDown={() => setDir(-1, 0)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">←</button>
+        <button onPointerDown={() => setDir(0, 1)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">↓</button>
+        <button onPointerDown={() => setDir(1, 0)} className="bg-white/20 active:bg-white/40 text-white rounded-lg py-3 font-bold text-lg select-none">→</button>
+      </div>
+      {(phase === 'over' || phase === 'won') && (
+        <div className="flex gap-3">
+          <button onClick={() => { setPhase('playing'); setGameKey(k => k + 1); }} className="px-5 py-2 bg-yellow-400 text-black rounded-xl font-bold text-sm shadow">Play Again</button>
+          <button onClick={onExit} className="px-5 py-2 bg-white/20 text-white rounded-xl font-bold text-sm">Back</button>
         </div>
       )}
     </div>
