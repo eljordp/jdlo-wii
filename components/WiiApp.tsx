@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, X, Send, ChevronRight } from 'lucide-react';
 import { getTheme, channelTiles, PROFILE_PHOTO } from '@/lib/themes';
@@ -21,6 +21,7 @@ export default function WiiApp() {
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [time, setTime] = useState(new Date());
   const [contactSent, setContactSent] = useState(false);
+  const [channelPage, setChannelPage] = useState(0);
 
   const theme = getTheme(themeId);
   const isPokemon = themeId === 'pokemon';
@@ -44,6 +45,18 @@ export default function WiiApp() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [screen]);
+
+  // Swipe gesture for mobile channel pages
+  const touchStartX = useRef(0);
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  }, []);
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    const diff = touchStartX.current - e.changedTouches[0].clientX;
+    const maxPage = Math.ceil(channelTiles.length / 4) - 1;
+    if (diff > 60) setChannelPage(p => Math.min(maxPage, p + 1));
+    else if (diff < -60) setChannelPage(p => Math.max(0, p - 1));
+  }, []);
 
   const changeTheme = useCallback((id: string) => {
     setThemeId(id);
@@ -136,41 +149,70 @@ export default function WiiApp() {
       {/* ═══════ MAIN DESKTOP ═══════ */}
       <div className="h-full w-full flex flex-col" style={{ background: theme.bg }}>
 
-        {/* Channel Grid */}
-        <div className="flex-1 flex items-center justify-center px-4 md:px-16 pt-4 md:pt-6" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 w-full max-w-[1100px]">
+        {/* Channel Grid — paginated on mobile (4 per page), full grid on desktop */}
+        <div className="flex-1 flex flex-col items-center justify-center px-4 md:px-16 pt-3 md:pt-6" style={{ paddingBottom: 'calc(85px + env(safe-area-inset-bottom, 0px))' }}>
+          {/* Desktop: all 8 */}
+          <div className="hidden md:grid grid-cols-4 gap-5 w-full max-w-[1100px]">
             {channelTiles.map((tile, i) => (
               <motion.button
                 key={tile.id}
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.05 + i * 0.04, duration: 0.3, ease: 'easeOut' }}
-                className="channel-tile flex flex-col items-center justify-center gap-3 md:gap-4"
+                className="channel-tile flex flex-col items-center justify-center gap-4"
                 style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
                 onClick={() => setOpenChannel(tile.id)}
               >
                 {tile.icon === 'profile' ? (
-                  <img
-                    src={PROFILE_PHOTO}
-                    alt="Profile"
-                    className="w-16 h-20 md:w-20 md:h-24 object-cover object-top relative z-[3] drop-shadow-md"
-                    style={{ borderRadius: '4px' }}
-                  />
+                  <img src={PROFILE_PHOTO} alt="Profile" className="w-20 h-24 object-cover object-top relative z-[3] drop-shadow-md" style={{ borderRadius: '4px' }} />
                 ) : (
-                  <span className="text-5xl md:text-7xl relative z-[3] drop-shadow-md">{tile.icon}</span>
+                  <span className="text-7xl relative z-[3] drop-shadow-md">{tile.icon}</span>
                 )}
-                <span
-                  className="text-[9px] md:text-[11px] font-bold tracking-wider relative z-[3]"
-                  style={{
-                    color: '#7a8a96',
-                    textShadow: '0 1px 0 rgba(255,255,255,0.7)',
-                    ...(isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : {}),
-                  }}
-                >
-                  {tile.name}
-                </span>
+                <span className="text-[11px] font-bold tracking-wider relative z-[3]" style={{ color: '#7a8a96', textShadow: '0 1px 0 rgba(255,255,255,0.7)', ...(isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : {}) }}>{tile.name}</span>
               </motion.button>
             ))}
+          </div>
+
+          {/* Mobile: 4 per page with page dots */}
+          <div className="md:hidden w-full flex flex-col items-center gap-4" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+            <motion.div
+              key={channelPage}
+              initial={{ opacity: 0, x: channelPage > 0 ? 40 : -40 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="grid grid-cols-2 gap-3 w-full"
+            >
+              {channelTiles.slice(channelPage * 4, channelPage * 4 + 4).map((tile, i) => (
+                <motion.button
+                  key={tile.id}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.03 + i * 0.04, duration: 0.25 }}
+                  className="channel-tile flex flex-col items-center justify-center gap-2 aspect-square"
+                  style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
+                  onClick={() => setOpenChannel(tile.id)}
+                >
+                  {tile.icon === 'profile' ? (
+                    <img src={PROFILE_PHOTO} alt="Profile" className="w-14 h-[72px] object-cover object-top relative z-[3] drop-shadow-md" style={{ borderRadius: '4px' }} />
+                  ) : (
+                    <span className="text-5xl relative z-[3] drop-shadow-md">{tile.icon}</span>
+                  )}
+                  <span className="text-[9px] font-bold tracking-wider relative z-[3]" style={{ color: '#7a8a96', textShadow: '0 1px 0 rgba(255,255,255,0.7)', ...(isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : {}) }}>{tile.name}</span>
+                </motion.button>
+              ))}
+            </motion.div>
+            {/* Page dots + arrows */}
+            <div className="flex items-center gap-4">
+              <button onClick={() => setChannelPage(0)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${channelPage === 0 ? 'opacity-30' : 'opacity-70 active:scale-90'}`} style={{ background: 'rgba(120,140,160,0.15)' }} disabled={channelPage === 0}>
+                <span className="text-gray-500 text-sm font-bold">‹</span>
+              </button>
+              {Array.from({ length: Math.ceil(channelTiles.length / 4) }).map((_, pi) => (
+                <button key={pi} onClick={() => setChannelPage(pi)} className={`w-2.5 h-2.5 rounded-full transition-all ${pi === channelPage ? 'bg-blue-400 scale-125' : 'bg-gray-300'}`} />
+              ))}
+              <button onClick={() => setChannelPage(1)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${channelPage === 1 ? 'opacity-30' : 'opacity-70 active:scale-90'}`} style={{ background: 'rgba(120,140,160,0.15)' }} disabled={channelPage >= Math.ceil(channelTiles.length / 4) - 1}>
+                <span className="text-gray-500 text-sm font-bold">›</span>
+              </button>
+            </div>
           </div>
         </div>
 
