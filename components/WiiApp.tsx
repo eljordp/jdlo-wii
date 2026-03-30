@@ -173,46 +173,26 @@ export default function WiiApp() {
             ))}
           </div>
 
-          {/* Mobile: 4 per page with page dots */}
-          <div className="md:hidden w-full flex flex-col items-center gap-4" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-            <motion.div
-              key={channelPage}
-              initial={{ opacity: 0, x: channelPage > 0 ? 40 : -40 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="grid grid-cols-2 gap-3 w-full"
-            >
-              {channelTiles.slice(channelPage * 4, channelPage * 4 + 4).map((tile, i) => (
-                <motion.button
-                  key={tile.id}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.03 + i * 0.04, duration: 0.25 }}
-                  className="channel-tile flex flex-col items-center justify-center gap-2 aspect-square"
-                  style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
-                  onClick={() => setOpenChannel(tile.id)}
-                >
-                  {tile.icon === 'profile' ? (
-                    <img src={PROFILE_PHOTO} alt="Profile" className="w-14 h-[72px] object-cover object-top relative z-[3] drop-shadow-md" style={{ borderRadius: '4px' }} />
-                  ) : (
-                    <span className="text-5xl relative z-[3] drop-shadow-md">{tile.icon}</span>
-                  )}
-                  <span className="text-[9px] font-bold tracking-wider relative z-[3]" style={{ color: '#7a8a96', textShadow: '0 1px 0 rgba(255,255,255,0.7)', ...(isPokemon ? { fontSize: '7px', letterSpacing: '0.05em' } : {}) }}>{tile.name}</span>
-                </motion.button>
-              ))}
-            </motion.div>
-            {/* Page dots + arrows */}
-            <div className="flex items-center gap-4">
-              <button onClick={() => setChannelPage(0)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${channelPage === 0 ? 'opacity-30' : 'opacity-70 active:scale-90'}`} style={{ background: 'rgba(120,140,160,0.15)' }} disabled={channelPage === 0}>
-                <span className="text-gray-500 text-sm font-bold">‹</span>
-              </button>
-              {Array.from({ length: Math.ceil(channelTiles.length / 4) }).map((_, pi) => (
-                <button key={pi} onClick={() => setChannelPage(pi)} className={`w-2.5 h-2.5 rounded-full transition-all ${pi === channelPage ? 'bg-blue-400 scale-125' : 'bg-gray-300'}`} />
-              ))}
-              <button onClick={() => setChannelPage(1)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${channelPage === 1 ? 'opacity-30' : 'opacity-70 active:scale-90'}`} style={{ background: 'rgba(120,140,160,0.15)' }} disabled={channelPage >= Math.ceil(channelTiles.length / 4) - 1}>
-                <span className="text-gray-500 text-sm font-bold">›</span>
-              </button>
-            </div>
+          {/* Mobile: all 8 in a tight 2x4 grid */}
+          <div className="md:hidden grid grid-cols-2 gap-2 w-full">
+            {channelTiles.map((tile, i) => (
+              <motion.button
+                key={tile.id}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.03 + i * 0.03, duration: 0.25 }}
+                className="channel-tile flex flex-col items-center justify-center gap-1 py-2"
+                style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
+                onClick={() => setOpenChannel(tile.id)}
+              >
+                {tile.icon === 'profile' ? (
+                  <img src={PROFILE_PHOTO} alt="Profile" className="w-10 h-13 object-cover object-top relative z-[3] drop-shadow-md" style={{ borderRadius: '3px' }} />
+                ) : (
+                  <span className="text-3xl relative z-[3] drop-shadow-md">{tile.icon}</span>
+                )}
+                <span className="text-[8px] font-bold tracking-wider relative z-[3]" style={{ color: '#7a8a96', textShadow: '0 1px 0 rgba(255,255,255,0.7)', ...(isPokemon ? { fontSize: '6px', letterSpacing: '0.05em' } : {}) }}>{tile.name}</span>
+              </motion.button>
+            ))}
           </div>
         </div>
 
