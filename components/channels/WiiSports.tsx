@@ -6,14 +6,14 @@ import type { WiiTheme } from '@/lib/themes';
 
 interface Props { onBack: () => void; theme: WiiTheme }
 
-type Sport = 'menu' | 'baseball' | 'basketball' | 'boxing' | 'tennis' | 'golf' | 'arcade';
-type ArcadeGame = 'snake' | 'pacman';
+type Sport = 'menu' | 'baseball' | 'bowling' | 'boxing' | 'tennis' | 'golf' | 'arcade';
+type ArcadeGame = 'snake' | 'pacman' | 'basketball' | 'breakout' | 'pong';
 type Difficulty = 'easy' | 'medium' | 'hard';
 type GameMode = '1p' | '2p';
 
 const sports = [
+  { id: 'bowling' as Sport, name: 'Bowling', emoji: '🎳', color: 'from-blue-500 to-blue-700' },
   { id: 'baseball' as Sport, name: 'Baseball', emoji: '⚾', color: 'from-red-500 to-red-600' },
-  { id: 'basketball' as Sport, name: 'Basketball', emoji: '🏀', color: 'from-orange-500 to-orange-600' },
   { id: 'boxing' as Sport, name: 'Boxing', emoji: '🥊', color: 'from-red-600 to-red-800' },
   { id: 'tennis' as Sport, name: 'Tennis', emoji: '🎾', color: 'from-green-500 to-green-600' },
   { id: 'golf' as Sport, name: 'Golf', emoji: '⛳', color: 'from-emerald-500 to-emerald-700' },
@@ -36,6 +36,862 @@ const BASE_POS = [
   { x: 300, y: 0.32 },  // 2B
   { x: 190, y: 0.53 },  // 3B
 ];
+
+// ═══════ BOWLING (Canvas) ═══════
+function Bowling({ difficulty, gameMode, onExit }: { difficulty: Difficulty; gameMode: GameMode; onExit: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef = useRef<number>(0);
+  const [tick, forceUpdate] = useState(0);
+  const [gameKey, setGameKey] = useState(0);
+
+  const W = 600, H = 440;
+  const LANE_L = 180, LANE_R = 420;
+  const GUTTER_W = 20;
+  const PIN_START_Y = 80;
+  const PIN_SPACING_X = 28;
+  const PIN_SPACING_Y = 26;
+  const PIN_RADIUS = 8;
+  const BALL_RADIUS = 10;
+  const BALL_START_Y = 400;
+
+  const oscSpeed = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 3.5 : 5.5;
+  const gutterMargin = difficulty === 'easy' ? 12 : difficulty === 'medium' ? 6 : 0;
+  const effectiveLaneL = LANE_L + GUTTER_W + gutterMargin;
+  const effectiveLaneR = LANE_R - GUTTER_W - gutterMargin;
+
+  function makePins(): { x: number; y: number; standing: boolean; vx: number; vy: number; ox: number; oy: number }[] {
+    const cx = (LANE_L + LANE_R) / 2;
+    const rows = [[1], [2, 3], [4, 5, 6], [7, 8, 9, 10]];
+    const pins: { x: number; y: number; standing: boolean; vx: number; vy: number; ox: number; oy: number }[] = [];
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const rowWidth = (row.length - 1) * PIN_SPACING_X;
+      for (let c = 0; c < row.length; c++) {
+        const px = cx - rowWidth / 2 + c * PIN_SPACING_X;
+        const py = PIN_START_Y + (3 - r) * PIN_SPACING_Y;
+        pins.push({ x: px, y: py, standing: true, vx: 0, vy: 0, ox: px, oy: py });
+      }
+    }
+    return pins;
+  }
+
+  const stateRef = useRef<{
+    pins: { x: number; y: number; standing: boolean; vx: number; vy: number; ox: number; oy: number }[];
+    ballX: number; ballY: number; ballVX: number; ballVY: number;
+    ballRolling: boolean;
+    phase: 'position' | 'power' | 'spin' | 'rolling' | 'scoring' | 'done';
+    positionX: number; positionDir: number;
+    powerLevel: number; powerDir: number;
+    spinLevel: number; spinDir: number;
+    frame: number; roll: number;
+    scores: number[][];
+    frameScores: (number | null)[];
+    message: string; messageTimer: number;
+    currentPlayer: 1 | 2;
+    p2Scores: number[][];
+    p2FrameScores: (number | null)[];
+    matchOver: boolean;
+    particles: { x: number; y: number; vx: number; vy: number; life: number; color: string }[];
+    scoringTimer: number;
+    guttered: boolean;
+    pinsAtStartOfRoll: number;
+  } | null>(null);
+
+  function initState(): void {
+    stateRef.current = {
+      pins: makePins(),
+      ballX: (LANE_L + LANE_R) / 2, ballY: BALL_START_Y,
+      ballVX: 0, ballVY: 0,
+      ballRolling: false,
+      phase: 'position',
+      positionX: (LANE_L + LANE_R) / 2, positionDir: 1,
+      powerLevel: 0, powerDir: 1,
+      spinLevel: 50, spinDir: 1,
+      frame: 1, roll: 1,
+      scores: [],
+      frameScores: Array(10).fill(null),
+      message: 'Frame 1', messageTimer: 60,
+      currentPlayer: 1,
+      p2Scores: [],
+      p2FrameScores: Array(10).fill(null),
+      matchOver: false,
+      particles: [],
+      scoringTimer: 0,
+      guttered: false,
+      pinsAtStartOfRoll: 10,
+    };
+  }
+
+  function calcFrameScores(scores: number[][]): (number | null)[] {
+    const fs: (number | null)[] = Array(10).fill(null);
+    let total = 0;
+    for (let f = 0; f < scores.length && f < 10; f++) {
+      const rolls = scores[f];
+      if (!rolls || rolls.length === 0) break;
+      if (f < 9) {
+        if (rolls[0] === 10) {
+          const next2 = getNextNRolls(scores, f, 2);
+          if (next2 === null) break;
+          total += 10 + next2;
+          fs[f] = total;
+        } else if (rolls.length >= 2 && rolls[0] + rolls[1] === 10) {
+          const next1 = getNextNRolls(scores, f, 1);
+          if (next1 === null) break;
+          total += 10 + next1;
+          fs[f] = total;
+        } else if (rolls.length >= 2) {
+          total += rolls[0] + rolls[1];
+          fs[f] = total;
+        }
+      } else {
+        if (rolls.length >= 2 && rolls[0] !== 10 && rolls[0] + rolls[1] !== 10) {
+          total += rolls[0] + rolls[1];
+          fs[f] = total;
+        } else if (rolls.length >= 3) {
+          total += rolls[0] + rolls[1] + rolls[2];
+          fs[f] = total;
+        }
+      }
+    }
+    return fs;
+  }
+
+  function getNextNRolls(scores: number[][], frameIdx: number, count: number): number | null {
+    let collected = 0;
+    let remaining = count;
+    for (let f = frameIdx + 1; f < scores.length && remaining > 0; f++) {
+      for (let r = 0; r < scores[f].length && remaining > 0; r++) {
+        collected += scores[f][r];
+        remaining--;
+      }
+    }
+    return remaining === 0 ? collected : null;
+  }
+
+  function countStanding(pins: { standing: boolean }[]): number {
+    return pins.filter(p => p.standing).length;
+  }
+
+  useEffect(() => {
+    initState();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const handleClick = () => {
+      const s = stateRef.current;
+      if (!s) return;
+      if (s.matchOver) { forceUpdate(n => n + 1); return; }
+      if (s.phase === 'position') {
+        s.ballX = s.positionX;
+        s.phase = 'power';
+        s.powerLevel = 0;
+        s.powerDir = 1;
+      } else if (s.phase === 'power') {
+        s.phase = 'spin';
+        s.spinLevel = 50;
+        s.spinDir = 1;
+      } else if (s.phase === 'spin') {
+        const power = (s.powerLevel / 100) * 8 + 3;
+        const spin = (s.spinLevel - 50) / 50;
+        s.ballVY = -power;
+        s.ballVX = spin * 3;
+        s.ballRolling = true;
+        s.phase = 'rolling';
+        s.guttered = false;
+        s.pinsAtStartOfRoll = countStanding(s.pins);
+      }
+    };
+
+    canvas.addEventListener('click', handleClick);
+    canvas.addEventListener('touchstart', handleClick, { passive: true });
+
+    function setupNextRoll(s: NonNullable<typeof stateRef.current>) {
+      s.ballX = s.positionX;
+      s.ballY = BALL_START_Y;
+      s.ballVX = 0;
+      s.ballVY = 0;
+      s.ballRolling = false;
+      s.phase = 'position';
+      s.positionDir = 1;
+      s.guttered = false;
+    }
+
+    function setupNextFrame(s: NonNullable<typeof stateRef.current>) {
+      s.pins = makePins();
+      s.ballX = (LANE_L + LANE_R) / 2;
+      s.positionX = (LANE_L + LANE_R) / 2;
+      s.ballY = BALL_START_Y;
+      s.ballVX = 0;
+      s.ballVY = 0;
+      s.ballRolling = false;
+      s.phase = 'position';
+      s.positionDir = 1;
+      s.roll = 1;
+      s.guttered = false;
+      s.pinsAtStartOfRoll = 10;
+    }
+
+    function spawnParticles(s: NonNullable<typeof stateRef.current>, x: number, y: number, count: number, color: string) {
+      for (let i = 0; i < count; i++) {
+        s.particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 8,
+          vy: -Math.random() * 5 - 1,
+          life: 20 + Math.random() * 20,
+          color,
+        });
+      }
+    }
+
+    function finishPlayerGame(s: NonNullable<typeof stateRef.current>) {
+      const isP1 = s.currentPlayer === 1;
+      if (isP1) {
+        s.frameScores = calcFrameScores(s.scores);
+      } else {
+        s.p2FrameScores = calcFrameScores(s.p2Scores);
+      }
+
+      if (gameMode === '2p' && isP1) {
+        s.currentPlayer = 2;
+        s.frame = 1;
+        s.roll = 1;
+        setupNextFrame(s);
+        s.message = 'P2\'s Turn';
+        s.messageTimer = 60;
+        return;
+      }
+
+      s.matchOver = true;
+      const p1Total = s.frameScores[9] ?? lastNonNull(s.frameScores);
+      if (gameMode === '2p') {
+        const p2Total = s.p2FrameScores[9] ?? lastNonNull(s.p2FrameScores);
+        if (p1Total > p2Total) s.message = `P1 WINS! ${p1Total}-${p2Total}`;
+        else if (p2Total > p1Total) s.message = `P2 WINS! ${p2Total}-${p1Total}`;
+        else s.message = `TIE! ${p1Total}-${p2Total}`;
+      } else {
+        s.message = `GAME OVER — Score: ${p1Total}`;
+      }
+      s.messageTimer = 200;
+      forceUpdate(n => n + 1);
+    }
+
+    function lastNonNull(arr: (number | null)[]): number {
+      for (let i = arr.length - 1; i >= 0; i--) { if (arr[i] !== null) return arr[i]!; }
+      return 0;
+    }
+
+    function advanceAfterRoll(s: NonNullable<typeof stateRef.current>) {
+      const standing = countStanding(s.pins);
+      const knockedThisRoll = s.pinsAtStartOfRoll - standing;
+      const isP1 = s.currentPlayer === 1;
+      const scores = isP1 ? s.scores : s.p2Scores;
+      const frameIdx = s.frame - 1;
+
+      if (!scores[frameIdx]) scores[frameIdx] = [];
+
+      if (s.frame < 10) {
+        if (s.roll === 1) {
+          scores[frameIdx] = [knockedThisRoll];
+          if (standing === 0) {
+            s.message = 'STRIKE!';
+            s.messageTimer = 60;
+            spawnParticles(s, (LANE_L + LANE_R) / 2, PIN_START_Y + 40, 20, '#fbbf24');
+            s.frame++;
+            if (isP1) s.frameScores = calcFrameScores(s.scores);
+            else s.p2FrameScores = calcFrameScores(s.p2Scores);
+            if (s.frame > 10) { finishPlayerGame(s); return; }
+            if (gameMode === '2p' && isP1) {
+              const savedFrame = s.frame;
+              s.frameScores = calcFrameScores(s.scores);
+              s.currentPlayer = 2;
+              s.frame = savedFrame - 1;
+              s.roll = 1;
+              setupNextFrame(s);
+              s.message = 'P2\'s Turn';
+              s.messageTimer = 60;
+              return;
+            } else if (gameMode === '2p' && !isP1) {
+              s.currentPlayer = 1;
+              s.p2FrameScores = calcFrameScores(s.p2Scores);
+              setupNextFrame(s);
+              s.message = `Frame ${s.frame}`;
+              s.messageTimer = 60;
+              return;
+            }
+            setupNextFrame(s);
+            s.message = `Frame ${s.frame}`;
+            s.messageTimer = 60;
+          } else {
+            s.roll = 2;
+            s.pinsAtStartOfRoll = standing;
+            setupNextRoll(s);
+          }
+        } else {
+          scores[frameIdx].push(knockedThisRoll);
+          if (isP1) s.frameScores = calcFrameScores(s.scores);
+          else s.p2FrameScores = calcFrameScores(s.p2Scores);
+
+          if (standing === 0) {
+            s.message = 'SPARE!';
+            s.messageTimer = 60;
+            spawnParticles(s, (LANE_L + LANE_R) / 2, PIN_START_Y + 40, 12, '#22c55e');
+          }
+
+          s.frame++;
+          if (s.frame > 10) { finishPlayerGame(s); return; }
+          if (gameMode === '2p' && isP1) {
+            s.frameScores = calcFrameScores(s.scores);
+            s.currentPlayer = 2;
+            s.frame = s.frame - 1;
+            s.roll = 1;
+            setupNextFrame(s);
+            s.message = 'P2\'s Turn';
+            s.messageTimer = 60;
+            return;
+          } else if (gameMode === '2p' && !isP1) {
+            s.currentPlayer = 1;
+            s.p2FrameScores = calcFrameScores(s.p2Scores);
+            setupNextFrame(s);
+            s.message = `Frame ${s.frame}`;
+            s.messageTimer = 60;
+            return;
+          }
+          setupNextFrame(s);
+          s.message = `Frame ${s.frame}`;
+          s.messageTimer = 60;
+        }
+      } else {
+        // 10th frame
+        if (s.roll === 1) {
+          scores[frameIdx] = [knockedThisRoll];
+          if (standing === 0) {
+            s.message = 'STRIKE!';
+            s.messageTimer = 50;
+            spawnParticles(s, (LANE_L + LANE_R) / 2, PIN_START_Y + 40, 20, '#fbbf24');
+            s.roll = 2;
+            s.pins = makePins();
+            s.pinsAtStartOfRoll = 10;
+            setupNextRoll(s);
+            s.pins = makePins();
+          } else {
+            s.roll = 2;
+            s.pinsAtStartOfRoll = standing;
+            setupNextRoll(s);
+          }
+        } else if (s.roll === 2) {
+          const firstRoll = scores[frameIdx][0];
+          scores[frameIdx].push(knockedThisRoll);
+          if (firstRoll === 10) {
+            if (standing === 0) {
+              s.message = 'DOUBLE!';
+              s.messageTimer = 50;
+              spawnParticles(s, (LANE_L + LANE_R) / 2, PIN_START_Y + 40, 20, '#fbbf24');
+              s.pins = makePins();
+              s.pinsAtStartOfRoll = 10;
+            } else {
+              s.pinsAtStartOfRoll = standing;
+            }
+            s.roll = 3;
+            setupNextRoll(s);
+            if (standing === 0) s.pins = makePins();
+          } else {
+            if (standing === 0) {
+              s.message = 'SPARE!';
+              s.messageTimer = 50;
+              spawnParticles(s, (LANE_L + LANE_R) / 2, PIN_START_Y + 40, 12, '#22c55e');
+              s.roll = 3;
+              s.pins = makePins();
+              s.pinsAtStartOfRoll = 10;
+              setupNextRoll(s);
+              s.pins = makePins();
+            } else {
+              finishPlayerGame(s);
+            }
+          }
+        } else {
+          scores[frameIdx].push(knockedThisRoll);
+          if (standing === 0) {
+            s.message = 'TURKEY!';
+            s.messageTimer = 60;
+            spawnParticles(s, (LANE_L + LANE_R) / 2, PIN_START_Y + 40, 25, '#fbbf24');
+          }
+          finishPlayerGame(s);
+        }
+        if (isP1) s.frameScores = calcFrameScores(s.scores);
+        else s.p2FrameScores = calcFrameScores(s.p2Scores);
+      }
+    }
+
+    function update() {
+      const s = stateRef.current;
+      if (!s || s.matchOver) return;
+
+      if (s.messageTimer > 0) s.messageTimer--;
+
+      if (s.phase === 'position') {
+        s.positionX += s.positionDir * oscSpeed;
+        if (s.positionX >= effectiveLaneR) { s.positionX = effectiveLaneR; s.positionDir = -1; }
+        if (s.positionX <= effectiveLaneL) { s.positionX = effectiveLaneL; s.positionDir = 1; }
+      }
+
+      if (s.phase === 'power') {
+        s.powerLevel += s.powerDir * oscSpeed * 0.8;
+        if (s.powerLevel >= 100) { s.powerLevel = 100; s.powerDir = -1; }
+        if (s.powerLevel <= 0) { s.powerLevel = 0; s.powerDir = 1; }
+      }
+
+      if (s.phase === 'spin') {
+        s.spinLevel += s.spinDir * oscSpeed * 1.2;
+        if (s.spinLevel >= 100) { s.spinLevel = 100; s.spinDir = -1; }
+        if (s.spinLevel <= 0) { s.spinLevel = 0; s.spinDir = 1; }
+      }
+
+      if (s.phase === 'rolling' && s.ballRolling) {
+        const curveFactor = 0.015;
+        s.ballVX += s.ballVX * curveFactor;
+        s.ballX += s.ballVX;
+        s.ballY += s.ballVY;
+
+        if (!s.guttered && (s.ballX < LANE_L + GUTTER_W || s.ballX > LANE_R - GUTTER_W)) {
+          s.guttered = true;
+          s.ballVX = 0;
+          s.message = 'GUTTER!';
+          s.messageTimer = 40;
+        }
+
+        if (s.ballX < LANE_L + 5) s.ballX = LANE_L + 5;
+        if (s.ballX > LANE_R - 5) s.ballX = LANE_R - 5;
+
+        if (!s.guttered) {
+          for (let i = 0; i < s.pins.length; i++) {
+            const pin = s.pins[i];
+            if (!pin.standing) continue;
+            const dx = s.ballX - pin.x;
+            const dy = s.ballY - pin.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < BALL_RADIUS + PIN_RADIUS) {
+              pin.standing = false;
+              const angle = Math.atan2(dy, dx);
+              pin.vx = -Math.cos(angle) * 4 + s.ballVX * 0.5;
+              pin.vy = -Math.sin(angle) * 4 + s.ballVY * 0.3;
+              s.ballVY *= 0.95;
+              spawnParticles(s, pin.x, pin.y, 4, '#fff');
+            }
+          }
+        }
+
+        for (let i = 0; i < s.pins.length; i++) {
+          const pi = s.pins[i];
+          if (pi.standing) continue;
+          if (Math.abs(pi.vx) < 0.1 && Math.abs(pi.vy) < 0.1) continue;
+          for (let j = 0; j < s.pins.length; j++) {
+            if (i === j || !s.pins[j].standing) continue;
+            const pj = s.pins[j];
+            const dx = pi.x - pj.x;
+            const dy = pi.y - pj.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < PIN_RADIUS * 2.5) {
+              pj.standing = false;
+              const angle = Math.atan2(dy, dx);
+              pj.vx = -Math.cos(angle) * 3;
+              pj.vy = -Math.sin(angle) * 3;
+              spawnParticles(s, pj.x, pj.y, 3, '#fff');
+            }
+          }
+        }
+
+        for (const pin of s.pins) {
+          if (!pin.standing) {
+            pin.x += pin.vx;
+            pin.y += pin.vy;
+            pin.vx *= 0.92;
+            pin.vy *= 0.92;
+          }
+        }
+
+        if (s.ballY < PIN_START_Y - 40) {
+          s.phase = 'scoring';
+          s.scoringTimer = 30;
+        }
+      }
+
+      if (s.phase === 'scoring') {
+        s.scoringTimer--;
+        if (s.scoringTimer <= 0) {
+          advanceAfterRoll(s);
+        }
+      }
+
+      s.particles = s.particles.filter(p => {
+        p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--;
+        return p.life > 0;
+      });
+    }
+
+    function drawLane(c: CanvasRenderingContext2D) {
+      c.fillStyle = '#1a1a2e';
+      c.fillRect(0, 0, W, H);
+
+      const laneGrad = c.createLinearGradient(LANE_L, 0, LANE_R, 0);
+      laneGrad.addColorStop(0, '#d4a574');
+      laneGrad.addColorStop(0.3, '#e8c89e');
+      laneGrad.addColorStop(0.5, '#f0d5a8');
+      laneGrad.addColorStop(0.7, '#e8c89e');
+      laneGrad.addColorStop(1, '#d4a574');
+      c.fillStyle = laneGrad;
+      c.fillRect(LANE_L + GUTTER_W, 0, LANE_R - LANE_L - GUTTER_W * 2, H);
+
+      c.strokeStyle = 'rgba(160,120,60,0.15)';
+      c.lineWidth = 1;
+      for (let x = LANE_L + GUTTER_W + 15; x < LANE_R - GUTTER_W; x += 30) {
+        c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke();
+      }
+
+      c.fillStyle = '#333';
+      c.fillRect(LANE_L, 0, GUTTER_W, H);
+      c.fillRect(LANE_R - GUTTER_W, 0, GUTTER_W, H);
+
+      c.strokeStyle = '#666';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(LANE_L, 0); c.lineTo(LANE_L, H);
+      c.moveTo(LANE_R, 0); c.lineTo(LANE_R, H);
+      c.stroke();
+
+      const cx = (LANE_L + LANE_R) / 2;
+      c.fillStyle = 'rgba(80,60,40,0.4)';
+      for (let i = -2; i <= 2; i++) {
+        c.beginPath(); c.arc(cx + i * 30, H - 60, 3, 0, Math.PI * 2); c.fill();
+      }
+
+      const arrowY = 260;
+      c.fillStyle = 'rgba(80,60,40,0.35)';
+      for (let i = -3; i <= 3; i++) {
+        const ax = cx + i * 22;
+        c.beginPath();
+        c.moveTo(ax, arrowY); c.lineTo(ax - 5, arrowY + 14); c.lineTo(ax + 5, arrowY + 14);
+        c.closePath(); c.fill();
+      }
+
+      c.strokeStyle = 'rgba(200,0,0,0.5)';
+      c.lineWidth = 2;
+      c.setLineDash([6, 4]);
+      c.beginPath(); c.moveTo(LANE_L, H - 30); c.lineTo(LANE_R, H - 30); c.stroke();
+      c.setLineDash([]);
+
+      c.fillStyle = 'rgba(240,220,180,0.3)';
+      c.fillRect(LANE_L + GUTTER_W, PIN_START_Y - 30, LANE_R - LANE_L - GUTTER_W * 2, PIN_SPACING_Y * 4 + 20);
+    }
+
+    function drawPins(c: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      for (const pin of s.pins) {
+        if (pin.standing) {
+          c.fillStyle = '#fff';
+          c.beginPath(); c.arc(pin.x, pin.y, PIN_RADIUS, 0, Math.PI * 2); c.fill();
+          c.strokeStyle = '#ccc'; c.lineWidth = 1; c.stroke();
+          c.strokeStyle = '#e53e3e'; c.lineWidth = 2.5;
+          c.beginPath(); c.arc(pin.x, pin.y, PIN_RADIUS * 0.6, -0.8, 0.8); c.stroke();
+          c.fillStyle = 'rgba(255,255,255,0.6)';
+          c.beginPath(); c.arc(pin.x - 2, pin.y - 2, 3, 0, Math.PI * 2); c.fill();
+        } else {
+          c.globalAlpha = 0.3;
+          c.fillStyle = '#aaa';
+          c.beginPath(); c.arc(pin.x, pin.y, PIN_RADIUS * 0.5, 0, Math.PI * 2); c.fill();
+          c.globalAlpha = 1;
+        }
+      }
+    }
+
+    function drawBall(c: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      if (s.phase === 'scoring' || s.phase === 'done') return;
+
+      const bx = s.ballRolling ? s.ballX : s.positionX;
+      const by = s.ballRolling ? s.ballY : BALL_START_Y;
+
+      c.fillStyle = 'rgba(0,0,0,0.3)';
+      c.beginPath(); c.ellipse(bx + 2, by + 2, BALL_RADIUS, BALL_RADIUS * 0.7, 0, 0, Math.PI * 2); c.fill();
+
+      const ballColor = s.currentPlayer === 1 ? '#3b82f6' : '#ef4444';
+      const ballHighlight = s.currentPlayer === 1 ? '#60a5fa' : '#f87171';
+      c.fillStyle = ballColor;
+      c.beginPath(); c.arc(bx, by, BALL_RADIUS, 0, Math.PI * 2); c.fill();
+      c.fillStyle = ballHighlight;
+      c.beginPath(); c.arc(bx - 3, by - 3, 4, 0, Math.PI * 2); c.fill();
+      c.fillStyle = 'rgba(0,0,0,0.3)';
+      c.beginPath(); c.arc(bx + 2, by - 2, 2, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(bx + 2, by + 2, 2, 0, Math.PI * 2); c.fill();
+    }
+
+    function drawMeters(c: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      if (s.phase === 'position') {
+        c.strokeStyle = '#ff0'; c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(s.positionX, BALL_START_Y - 20);
+        c.lineTo(s.positionX - 8, BALL_START_Y - 30);
+        c.moveTo(s.positionX, BALL_START_Y - 20);
+        c.lineTo(s.positionX + 8, BALL_START_Y - 30);
+        c.moveTo(s.positionX, BALL_START_Y - 20);
+        c.lineTo(s.positionX, BALL_START_Y - 5);
+        c.stroke();
+      }
+
+      const meterX = 30;
+
+      if (s.phase === 'power' || s.phase === 'spin') {
+        const meterY = 80;
+        const meterH = 250;
+
+        c.fillStyle = 'rgba(0,0,0,0.7)';
+        c.fillRect(meterX - 8, meterY - 20, 46, meterH + 40);
+        c.fillStyle = '#fff'; c.font = 'bold 10px sans-serif'; c.textAlign = 'center';
+        c.fillText('POWER', meterX + 15, meterY - 6);
+
+        c.fillStyle = '#333'; c.fillRect(meterX, meterY, 12, meterH);
+
+        const pct = s.powerLevel / 100;
+        const fillH = meterH * pct;
+        const grad = c.createLinearGradient(0, meterY + meterH, 0, meterY);
+        grad.addColorStop(0, '#22c55e'); grad.addColorStop(0.6, '#eab308'); grad.addColorStop(1, '#ef4444');
+        c.fillStyle = grad;
+        c.fillRect(meterX, meterY + meterH - fillH, 12, fillH);
+
+        if (s.phase === 'power') {
+          const indY = meterY + meterH - fillH;
+          c.fillStyle = '#fff';
+          c.beginPath();
+          c.moveTo(meterX + 14, indY); c.lineTo(meterX + 24, indY - 5); c.lineTo(meterX + 24, indY + 5);
+          c.fill();
+        }
+
+        c.fillStyle = '#fff'; c.font = 'bold 10px sans-serif'; c.textAlign = 'center';
+        c.fillText(`${Math.round(s.powerLevel)}%`, meterX + 15, meterY + meterH + 16);
+      }
+
+      if (s.phase === 'spin') {
+        const spinX = meterX + 50;
+        const spinY = 80;
+        const spinW = 12;
+        const spinH = 250;
+
+        c.fillStyle = 'rgba(0,0,0,0.7)';
+        c.fillRect(spinX - 8, spinY - 20, 46, spinH + 40);
+        c.fillStyle = '#fff'; c.font = 'bold 10px sans-serif'; c.textAlign = 'center';
+        c.fillText('SPIN', spinX + 15, spinY - 6);
+
+        c.fillStyle = '#333'; c.fillRect(spinX, spinY, spinW, spinH);
+
+        const centerY = spinY + spinH * 0.4;
+        const centerH = spinH * 0.2;
+        c.fillStyle = 'rgba(34,197,94,0.3)';
+        c.fillRect(spinX, centerY, spinW, centerH);
+
+        const spinPct = s.spinLevel / 100;
+        const indY = spinY + spinH * (1 - spinPct);
+        c.fillStyle = '#fff';
+        c.beginPath();
+        c.moveTo(spinX + spinW + 2, indY); c.lineTo(spinX + spinW + 12, indY - 5); c.lineTo(spinX + spinW + 12, indY + 5);
+        c.fill();
+
+        c.font = '8px sans-serif'; c.fillStyle = '#aaa'; c.textAlign = 'left';
+        c.fillText('\u2190 HOOK', spinX + spinW + 14, spinY + 10);
+        c.fillText('STRAIGHT', spinX + spinW + 14, spinY + spinH / 2 + 3);
+        c.fillText('HOOK \u2192', spinX + spinW + 14, spinY + spinH - 4);
+      }
+    }
+
+    function drawScoreboard(c: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      const sbH = gameMode === '2p' ? 90 : 52;
+      c.fillStyle = 'rgba(0,0,0,0.85)';
+      c.fillRect(LANE_L, 0, LANE_R - LANE_L, sbH);
+      c.strokeStyle = '#555'; c.lineWidth = 1;
+      c.strokeRect(LANE_L, 0, LANE_R - LANE_L, sbH);
+
+      const frameW = (LANE_R - LANE_L) / 10;
+
+      const drawRow = (scores: number[][], frameScores: (number | null)[], yOff: number, color: string) => {
+        c.font = '9px sans-serif'; c.textAlign = 'center';
+        for (let f = 0; f < 10; f++) {
+          const fx = LANE_L + f * frameW;
+          c.fillStyle = '#666';
+          c.fillText(`${f + 1}`, fx + frameW / 2, yOff + 10);
+
+          const rolls = scores[f] || [];
+          c.font = 'bold 9px sans-serif';
+
+          if (f < 9) {
+            if (rolls[0] === 10) {
+              c.fillStyle = '#fbbf24';
+              c.fillText('X', fx + frameW / 2, yOff + 22);
+            } else if (rolls.length >= 2) {
+              c.fillStyle = color;
+              c.fillText(`${rolls[0]}`, fx + frameW * 0.3, yOff + 22);
+              if (rolls[0] + rolls[1] === 10) {
+                c.fillStyle = '#22c55e';
+                c.fillText('/', fx + frameW * 0.7, yOff + 22);
+              } else {
+                c.fillText(`${rolls[1]}`, fx + frameW * 0.7, yOff + 22);
+              }
+            } else if (rolls.length === 1) {
+              c.fillStyle = color;
+              c.fillText(`${rolls[0]}`, fx + frameW * 0.3, yOff + 22);
+            }
+          } else {
+            for (let r = 0; r < rolls.length && r < 3; r++) {
+              const rx = fx + frameW * (0.2 + r * 0.25);
+              if (rolls[r] === 10) {
+                c.fillStyle = '#fbbf24'; c.fillText('X', rx, yOff + 22);
+              } else if (r > 0 && rolls[r - 1] !== 10 && rolls[r - 1] + rolls[r] === 10) {
+                c.fillStyle = '#22c55e'; c.fillText('/', rx, yOff + 22);
+              } else {
+                c.fillStyle = color; c.fillText(`${rolls[r]}`, rx, yOff + 22);
+              }
+            }
+          }
+
+          if (frameScores[f] !== null) {
+            c.fillStyle = '#fff'; c.font = 'bold 10px sans-serif';
+            c.fillText(`${frameScores[f]}`, fx + frameW / 2, yOff + 34);
+          }
+
+          c.strokeStyle = '#444'; c.lineWidth = 0.5;
+          c.beginPath(); c.moveTo(fx + frameW, yOff); c.lineTo(fx + frameW, yOff + 38); c.stroke();
+        }
+      };
+
+      drawRow(s.scores, s.frameScores, 2, gameMode === '2p' ? '#3b82f6' : '#fff');
+      if (gameMode === '2p') {
+        c.strokeStyle = '#555'; c.lineWidth = 0.5;
+        c.beginPath(); c.moveTo(LANE_L, 42); c.lineTo(LANE_R, 42); c.stroke();
+        drawRow(s.p2Scores, s.p2FrameScores, 44, '#ef4444');
+      }
+
+      const indicatorY = sbH + 2;
+      c.fillStyle = 'rgba(0,0,0,0.6)';
+      c.fillRect(LANE_L, indicatorY, LANE_R - LANE_L, 18);
+      c.fillStyle = s.currentPlayer === 1 ? '#3b82f6' : '#ef4444';
+      c.font = 'bold 11px sans-serif'; c.textAlign = 'center';
+      const label = gameMode === '2p'
+        ? `P${s.currentPlayer} \u2014 Frame ${Math.min(s.frame, 10)} Roll ${s.roll}`
+        : `Frame ${Math.min(s.frame, 10)} \u2014 Roll ${s.roll}`;
+      c.fillText(label, (LANE_L + LANE_R) / 2, indicatorY + 13);
+    }
+
+    function drawHUD(c: CanvasRenderingContext2D, s: NonNullable<typeof stateRef.current>) {
+      if (!s.ballRolling && s.phase !== 'scoring' && s.phase !== 'done' && !s.matchOver) {
+        c.fillStyle = 'rgba(0,0,0,0.6)';
+        c.fillRect(LANE_L, H - 28, LANE_R - LANE_L, 28);
+        c.fillStyle = '#fff'; c.font = 'bold 12px sans-serif'; c.textAlign = 'center';
+        const phaseText = s.phase === 'position' ? 'Click to set position' : s.phase === 'power' ? 'Click to set power' : 'Click to set spin';
+        c.fillText(phaseText, (LANE_L + LANE_R) / 2, H - 10);
+      }
+
+      if (!s.matchOver) {
+        const standing = countStanding(s.pins);
+        c.fillStyle = 'rgba(0,0,0,0.6)';
+        c.fillRect(W - 70, H - 28, 70, 28);
+        c.fillStyle = '#fff'; c.font = 'bold 11px sans-serif'; c.textAlign = 'center';
+        c.fillText(`Pins: ${standing}`, W - 35, H - 10);
+      }
+
+      if (s.messageTimer > 0 && s.message) {
+        const alpha = Math.min(1, s.messageTimer / 20);
+        c.globalAlpha = alpha;
+        c.font = 'bold 28px sans-serif'; c.fillStyle = '#fff';
+        c.strokeStyle = '#000'; c.lineWidth = 4; c.textAlign = 'center';
+        c.strokeText(s.message, W / 2, H * 0.5);
+        c.fillText(s.message, W / 2, H * 0.5);
+        c.globalAlpha = 1;
+      }
+
+      if (s.matchOver) {
+        c.fillStyle = 'rgba(0,0,0,0.75)';
+        c.fillRect(0, 0, W, H);
+
+        c.font = 'bold 32px sans-serif'; c.fillStyle = '#fbbf24'; c.textAlign = 'center';
+        c.fillText(s.message, W / 2, H * 0.35);
+
+        const p1Total = s.frameScores[9] ?? lastNonNull(s.frameScores);
+        c.font = 'bold 18px sans-serif';
+        if (gameMode === '2p') {
+          const p2Total = s.p2FrameScores[9] ?? lastNonNull(s.p2FrameScores);
+          c.fillStyle = '#3b82f6'; c.fillText(`P1: ${p1Total}`, W * 0.35, H * 0.5);
+          c.fillStyle = '#ef4444'; c.fillText(`P2: ${p2Total}`, W * 0.65, H * 0.5);
+        } else {
+          c.fillStyle = '#fff'; c.fillText(`Final Score: ${p1Total}`, W / 2, H * 0.5);
+          c.font = '14px sans-serif'; c.fillStyle = '#aaa';
+          const rating = p1Total >= 250 ? 'AMAZING!' : p1Total >= 200 ? 'Great Game!' : p1Total >= 150 ? 'Good Game' : p1Total >= 100 ? 'Not Bad' : 'Keep Practicing';
+          c.fillText(rating, W / 2, H * 0.58);
+        }
+
+        c.font = '13px sans-serif'; c.fillStyle = '#ccc';
+        c.fillText('Use buttons below', W / 2, H * 0.7);
+      }
+    }
+
+    function render() {
+      const s = stateRef.current;
+      if (!s) return;
+      const c = canvasRef.current?.getContext('2d');
+      if (!c) return;
+
+      drawLane(c);
+      drawScoreboard(c, s);
+      drawPins(c, s);
+      drawBall(c, s);
+      drawMeters(c, s);
+
+      for (const p of s.particles) {
+        c.globalAlpha = p.life / 20;
+        c.fillStyle = p.color;
+        c.beginPath(); c.arc(p.x, p.y, 2.5, 0, Math.PI * 2); c.fill();
+      }
+      c.globalAlpha = 1;
+
+      drawHUD(c, s);
+    }
+
+    function gameLoop() {
+      update();
+      render();
+      animRef.current = requestAnimationFrame(gameLoop);
+    }
+    animRef.current = requestAnimationFrame(gameLoop);
+
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      canvas.removeEventListener('click', handleClick);
+      canvas.removeEventListener('touchstart', handleClick);
+    };
+  }, [gameMode, gameKey]);
+
+  const btnClass = "px-3 py-2 font-bold rounded-lg active:scale-90 transition-all text-xs shadow-lg";
+
+  const doAction = () => {
+    canvasRef.current?.click();
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-2 p-2">
+      <canvas ref={canvasRef} width={W} height={H}
+        className="rounded-xl border-2 border-white/20 shadow-2xl w-full max-w-[600px] cursor-pointer touch-none"
+        tabIndex={0} />
+      <div className="w-full max-w-[600px] space-y-1.5">
+        <div className="flex gap-1.5 justify-center flex-wrap">
+          <button onPointerDown={doAction} className={`${btnClass} bg-blue-500 text-white px-6 text-sm`}>BOWL!</button>
+        </div>
+      </div>
+      {tick >= 0 && stateRef.current?.matchOver && (
+        <div className="bg-black/40 rounded-2xl px-4 py-3 text-center w-full max-w-[600px] flex gap-2 justify-center">
+          <button onClick={() => setGameKey(k => k + 1)} className="px-6 py-2 bg-yellow-400 text-black rounded-xl font-bold hover:bg-yellow-300 active:scale-95 transition-all">Play Again</button>
+          <button onClick={onExit} className="px-6 py-2 bg-white/20 text-white rounded-xl font-bold hover:bg-white/30 active:scale-95 transition-all">Back</button>
+        </div>
+      )}
+      <button onClick={onExit} className="px-4 py-1.5 bg-white/10 text-white/70 rounded-lg text-xs hover:bg-white/20 transition-colors">&larr; Back</button>
+    </div>
+  );
+}
 
 // ═══════ BASEBALL (Canvas) ═══════
 type PitchType = 'fastball' | 'curve' | 'changeup';
@@ -4961,6 +5817,512 @@ function PacManGame({ onExit }: { onExit: () => void }) {
   );
 }
 
+// ═══════ BREAKOUT ═══════
+function BreakoutGame({ onExit }: { onExit: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [gameKey, setGameKey] = useState(0);
+  const [phase, setPhase] = useState<'playing' | 'over' | 'won'>('playing');
+  const [highScore, setHighScore] = useState(0);
+
+  useEffect(() => {
+    try { setHighScore(parseInt(localStorage.getItem('breakout_hs') || '0')); } catch { /**/ }
+  }, []);
+
+  const paddleXRef = useRef(0.5);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const W = 600, H = 440;
+    canvas.width = W; canvas.height = H;
+
+    const BRICK_ROWS = 5, BRICK_COLS = 10;
+    const BRICK_W = (W - 20) / BRICK_COLS, BRICK_H = 18, BRICK_GAP = 2, BRICK_TOP = 50;
+    const PADDLE_W = 80, PADDLE_H = 12, PADDLE_Y = H - 30;
+    const BALL_R = 6;
+    const ROW_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
+
+    let bricks: boolean[][] = [];
+    let score = 0, lives = 3, level = 1, running = true;
+    let ballX = W / 2, ballY = PADDLE_Y - BALL_R - 1;
+    let ballVX = 3, ballVY = -3;
+    let launched = false;
+    let paddleX = W / 2;
+    let trail: { x: number; y: number; a: number }[] = [];
+
+    const resetBricks = () => {
+      bricks = Array.from({ length: BRICK_ROWS }, () => Array(BRICK_COLS).fill(true));
+    };
+    resetBricks();
+
+    const bricksRemaining = () => bricks.flat().filter(Boolean).length;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'a' || e.key === 'A') paddleXRef.current = Math.max(0, paddleXRef.current - 0.06);
+      if (e.key === 'd' || e.key === 'D') paddleXRef.current = Math.min(1, paddleXRef.current + 0.06);
+      if ((e.key === ' ' || e.key === 'Enter') && !launched) launched = true;
+    };
+    window.addEventListener('keydown', onKey);
+
+    const onMove = (clientX: number) => {
+      const rect = canvas.getBoundingClientRect();
+      paddleXRef.current = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    };
+    const onMouse = (e: MouseEvent) => onMove(e.clientX);
+    const onTouch = (e: TouchEvent) => { e.preventDefault(); onMove(e.touches[0].clientX); };
+    const onClick = () => { if (!launched) launched = true; };
+    canvas.addEventListener('mousemove', onMouse);
+    canvas.addEventListener('touchmove', onTouch, { passive: false });
+    canvas.addEventListener('touchstart', onTouch, { passive: false });
+    canvas.addEventListener('click', onClick);
+
+    let raf: number;
+
+    const render = () => {
+      if (!running) return;
+      raf = requestAnimationFrame(render);
+
+      // Update paddle position
+      paddleX = PADDLE_W / 2 + paddleXRef.current * (W - PADDLE_W);
+
+      if (!launched) {
+        ballX = paddleX;
+        ballY = PADDLE_Y - BALL_R - 1;
+      } else {
+        // Trail
+        trail.push({ x: ballX, y: ballY, a: 0.5 });
+        if (trail.length > 8) trail.shift();
+        trail.forEach(t => t.a *= 0.85);
+
+        ballX += ballVX;
+        ballY += ballVY;
+
+        // Wall collisions
+        if (ballX - BALL_R < 0) { ballX = BALL_R; ballVX = Math.abs(ballVX); }
+        if (ballX + BALL_R > W) { ballX = W - BALL_R; ballVX = -Math.abs(ballVX); }
+        if (ballY - BALL_R < 0) { ballY = BALL_R; ballVY = Math.abs(ballVY); }
+
+        // Paddle collision
+        if (ballVY > 0 && ballY + BALL_R >= PADDLE_Y && ballY + BALL_R <= PADDLE_Y + PADDLE_H + 4 &&
+            ballX >= paddleX - PADDLE_W / 2 && ballX <= paddleX + PADDLE_W / 2) {
+          ballVY = -Math.abs(ballVY);
+          const offset = (ballX - paddleX) / (PADDLE_W / 2);
+          ballVX = offset * 5;
+          ballY = PADDLE_Y - BALL_R - 1;
+        }
+
+        // Brick collisions
+        for (let r = 0; r < BRICK_ROWS; r++) {
+          for (let c = 0; c < BRICK_COLS; c++) {
+            if (!bricks[r][c]) continue;
+            const bx = 10 + c * BRICK_W, by = BRICK_TOP + r * (BRICK_H + BRICK_GAP);
+            if (ballX + BALL_R > bx && ballX - BALL_R < bx + BRICK_W &&
+                ballY + BALL_R > by && ballY - BALL_R < by + BRICK_H) {
+              bricks[r][c] = false;
+              score += 10;
+              // Check if entire row cleared for bonus
+              if (bricks[r].every(b => !b)) score += 50;
+              // Determine bounce direction
+              const overlapLeft = (ballX + BALL_R) - bx;
+              const overlapRight = (bx + BRICK_W) - (ballX - BALL_R);
+              const overlapTop = (ballY + BALL_R) - by;
+              const overlapBottom = (by + BRICK_H) - (ballY - BALL_R);
+              const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+              if (minOverlap === overlapTop || minOverlap === overlapBottom) ballVY = -ballVY;
+              else ballVX = -ballVX;
+              // Speed up slightly
+              const spd = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+              const newSpd = Math.min(spd + 0.02, 8 + level);
+              ballVX = (ballVX / spd) * newSpd;
+              ballVY = (ballVY / spd) * newSpd;
+            }
+          }
+        }
+
+        // Ball fell
+        if (ballY - BALL_R > H) {
+          lives--;
+          if (lives <= 0) {
+            running = false;
+            const prev = parseInt(localStorage.getItem('breakout_hs') || '0');
+            if (score > prev) { localStorage.setItem('breakout_hs', String(score)); setHighScore(score); }
+            setPhase('over');
+          }
+          launched = false;
+          trail = [];
+        }
+
+        // Level cleared
+        if (bricksRemaining() === 0) {
+          level++;
+          resetBricks();
+          launched = false;
+          trail = [];
+          const spd = 3 + level * 0.5;
+          ballVX = spd * (Math.random() > 0.5 ? 1 : -1) * 0.6;
+          ballVY = -spd;
+        }
+      }
+
+      // Draw
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, W, H);
+
+      // Bricks
+      for (let r = 0; r < BRICK_ROWS; r++) {
+        for (let c = 0; c < BRICK_COLS; c++) {
+          if (!bricks[r][c]) continue;
+          const bx = 10 + c * BRICK_W, by = BRICK_TOP + r * (BRICK_H + BRICK_GAP);
+          const grad = ctx.createLinearGradient(bx, by, bx, by + BRICK_H);
+          grad.addColorStop(0, ROW_COLORS[r]);
+          grad.addColorStop(1, ROW_COLORS[r] + 'aa');
+          ctx.fillStyle = grad;
+          ctx.beginPath(); ctx.roundRect(bx + 1, by, BRICK_W - 2, BRICK_H, 3); ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.roundRect(bx + 1, by, BRICK_W - 2, BRICK_H, 3); ctx.stroke();
+        }
+      }
+
+      // Trail
+      trail.forEach(t => {
+        ctx.fillStyle = `rgba(255,255,255,${t.a * 0.3})`;
+        ctx.beginPath(); ctx.arc(t.x, t.y, BALL_R * t.a, 0, Math.PI * 2); ctx.fill();
+      });
+
+      // Ball
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = '#fff'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(ballX, ballY, BALL_R, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Paddle
+      const pGrad = ctx.createLinearGradient(paddleX - PADDLE_W / 2, PADDLE_Y, paddleX - PADDLE_W / 2, PADDLE_Y + PADDLE_H);
+      pGrad.addColorStop(0, '#94a3b8');
+      pGrad.addColorStop(0.5, '#e2e8f0');
+      pGrad.addColorStop(1, '#64748b');
+      ctx.fillStyle = pGrad;
+      ctx.beginPath(); ctx.roundRect(paddleX - PADDLE_W / 2, PADDLE_Y, PADDLE_W, PADDLE_H, 4); ctx.fill();
+
+      // HUD
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, W, 28);
+      ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#fff'; ctx.fillText(`Score: ${score}`, 10, 18);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#a78bfa'; ctx.fillText(`Level ${level}`, W / 2, 18);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#fbbf24'; ctx.fillText(`Best: ${parseInt(localStorage.getItem('breakout_hs') || '0')}`, W - 10, 18);
+      // Lives as ball icons
+      for (let i = 0; i < lives; i++) {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(20 + i * 18, H - 12, 5, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Launch prompt
+      if (!launched && running) {
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '14px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('Click / Tap to Launch', W / 2, H / 2 + 40);
+      }
+
+      // Game over overlay
+      if (!running) {
+        ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 28px Arial'; ctx.fillStyle = '#ef4444';
+        ctx.fillText('GAME OVER', W / 2, H / 2 - 20);
+        ctx.font = 'bold 16px Arial'; ctx.fillStyle = '#fff';
+        ctx.fillText(`Score: ${score}  |  Level: ${level}`, W / 2, H / 2 + 12);
+        const prev = parseInt(localStorage.getItem('breakout_hs') || '0');
+        if (score >= prev && score > 0) {
+          ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 14px Arial';
+          ctx.fillText('New High Score!', W / 2, H / 2 + 40);
+        }
+      }
+    };
+
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('keydown', onKey);
+      canvas.removeEventListener('mousemove', onMouse);
+      canvas.removeEventListener('touchmove', onTouch);
+      canvas.removeEventListener('touchstart', onTouch);
+      canvas.removeEventListener('click', onClick);
+    };
+  }, [gameKey]);
+
+  return (
+    <div className="flex flex-col items-center gap-3 p-4">
+      <div className="flex items-center justify-between w-full max-w-[600px]">
+        <p className="text-white font-bold text-sm">🧱 Breakout</p>
+        <p className="text-yellow-300 font-bold text-sm">Best: {highScore}</p>
+      </div>
+      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] touch-none cursor-pointer" style={{ aspectRatio: '600/440' }} />
+      <div className="flex gap-3 md:hidden">
+        <button onPointerDown={() => { paddleXRef.current = Math.max(0, paddleXRef.current - 0.08); }} className="bg-white/20 active:bg-white/40 text-white rounded-lg px-6 py-3 font-bold text-lg select-none">←</button>
+        <button onPointerDown={() => { const c = canvasRef.current; if (c) c.click(); }} className="bg-purple-500/60 active:bg-purple-500 text-white rounded-lg px-6 py-3 font-bold text-sm select-none">Launch</button>
+        <button onPointerDown={() => { paddleXRef.current = Math.min(1, paddleXRef.current + 0.08); }} className="bg-white/20 active:bg-white/40 text-white rounded-lg px-6 py-3 font-bold text-lg select-none">→</button>
+      </div>
+      {(phase === 'over' || phase === 'won') && (
+        <div className="flex gap-3">
+          <button onClick={() => { setPhase('playing'); setGameKey(k => k + 1); }} className="px-5 py-2 bg-purple-500 text-white rounded-xl font-bold text-sm shadow">Play Again</button>
+          <button onClick={onExit} className="px-5 py-2 bg-white/20 text-white rounded-xl font-bold text-sm">Back</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════ PONG ═══════
+function PongGame({ onExit }: { onExit: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [gameKey, setGameKey] = useState(0);
+  const [phase, setPhase] = useState<'playing' | 'over'>('playing');
+  const [wins, setWins] = useState(0);
+
+  useEffect(() => {
+    try { setWins(parseInt(localStorage.getItem('pong_wins') || '0')); } catch { /**/ }
+  }, []);
+
+  const playerInputRef = useRef(0); // -1 up, 0 none, 1 down
+  const playerTouchYRef = useRef(-1);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const W = 600, H = 440;
+    canvas.width = W; canvas.height = H;
+
+    const PADDLE_W = 12, PADDLE_H = 70, BALL_R = 7;
+    const WIN_SCORE = 7;
+    const CPU_SPEED = 3.5;
+
+    let playerY = H / 2, cpuY = H / 2;
+    let ballX = W / 2, ballY = H / 2;
+    let ballVX = 4, ballVY = 2;
+    let playerScore = 0, cpuScore = 0;
+    let rally = 0;
+    let running = true;
+    let serving = true;
+    let serveTimer = 60;
+    let winner = '';
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') playerInputRef.current = -1;
+      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') playerInputRef.current = 1;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') && playerInputRef.current === -1) playerInputRef.current = 0;
+      if ((e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') && playerInputRef.current === 1) playerInputRef.current = 0;
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+
+    const onTouch = (e: TouchEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const y = (e.touches[0].clientY - rect.top) / rect.height * H;
+      playerTouchYRef.current = y;
+    };
+    const onTouchEnd = () => { playerTouchYRef.current = -1; };
+    canvas.addEventListener('touchmove', onTouch, { passive: false });
+    canvas.addEventListener('touchstart', onTouch, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
+
+    const resetBall = (dir: number) => {
+      ballX = W / 2; ballY = H / 2;
+      const spd = 4;
+      const angle = (Math.random() * 0.8 - 0.4);
+      ballVX = spd * dir * Math.cos(angle);
+      ballVY = spd * Math.sin(angle);
+      rally = 0;
+      serving = true;
+      serveTimer = 60;
+    };
+
+    let raf: number;
+
+    const render = () => {
+      if (!running) return;
+      raf = requestAnimationFrame(render);
+
+      // Player movement
+      if (playerTouchYRef.current >= 0) {
+        const target = playerTouchYRef.current;
+        if (target < playerY - 2) playerY -= 5;
+        else if (target > playerY + 2) playerY += 5;
+      } else {
+        playerY += playerInputRef.current * 5;
+      }
+      playerY = Math.max(PADDLE_H / 2, Math.min(H - PADDLE_H / 2, playerY));
+
+      // CPU AI
+      const cpuTarget = ballX > W / 2 ? ballY + ballVY * 6 : H / 2;
+      const cpuDiff = cpuTarget - cpuY;
+      const cpuMove = Math.min(CPU_SPEED, Math.abs(cpuDiff)) * Math.sign(cpuDiff);
+      cpuY += cpuMove;
+      cpuY = Math.max(PADDLE_H / 2, Math.min(H - PADDLE_H / 2, cpuY));
+
+      // Ball movement
+      if (serving) {
+        serveTimer--;
+        if (serveTimer <= 0) serving = false;
+      } else {
+        ballX += ballVX;
+        ballY += ballVY;
+
+        // Top/bottom walls
+        if (ballY - BALL_R < 0) { ballY = BALL_R; ballVY = Math.abs(ballVY); }
+        if (ballY + BALL_R > H) { ballY = H - BALL_R; ballVY = -Math.abs(ballVY); }
+
+        // Player paddle (left)
+        if (ballVX < 0 && ballX - BALL_R <= 25 + PADDLE_W && ballX - BALL_R >= 25 &&
+            ballY >= playerY - PADDLE_H / 2 - BALL_R && ballY <= playerY + PADDLE_H / 2 + BALL_R) {
+          ballVX = Math.abs(ballVX);
+          const offset = (ballY - playerY) / (PADDLE_H / 2);
+          ballVY = offset * 4;
+          rally++;
+          // Speed up
+          const spd = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+          const newSpd = Math.min(spd + 0.15, 10);
+          ballVX = (ballVX / spd) * newSpd;
+          ballVY = (ballVY / spd) * newSpd;
+          ballX = 25 + PADDLE_W + BALL_R;
+        }
+
+        // CPU paddle (right)
+        if (ballVX > 0 && ballX + BALL_R >= W - 25 - PADDLE_W && ballX + BALL_R <= W - 25 &&
+            ballY >= cpuY - PADDLE_H / 2 - BALL_R && ballY <= cpuY + PADDLE_H / 2 + BALL_R) {
+          ballVX = -Math.abs(ballVX);
+          const offset = (ballY - cpuY) / (PADDLE_H / 2);
+          ballVY = offset * 4;
+          rally++;
+          const spd = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+          const newSpd = Math.min(spd + 0.15, 10);
+          ballVX = (ballVX / spd) * newSpd;
+          ballVY = (ballVY / spd) * newSpd;
+          ballX = W - 25 - PADDLE_W - BALL_R;
+        }
+
+        // Scoring
+        if (ballX < -BALL_R) {
+          cpuScore++;
+          if (cpuScore >= WIN_SCORE) {
+            running = false; winner = 'CPU'; setPhase('over');
+          } else resetBall(1);
+        }
+        if (ballX > W + BALL_R) {
+          playerScore++;
+          if (playerScore >= WIN_SCORE) {
+            running = false; winner = 'YOU';
+            const prev = parseInt(localStorage.getItem('pong_wins') || '0');
+            localStorage.setItem('pong_wins', String(prev + 1));
+            setWins(prev + 1);
+            setPhase('over');
+          } else resetBall(-1);
+        }
+      }
+
+      // Draw
+      ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
+
+      // Center dashed line
+      ctx.setLineDash([8, 8]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Scores
+      ctx.font = 'bold 48px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillText(String(playerScore), W / 2 - 60, 60);
+      ctx.fillText(String(cpuScore), W / 2 + 60, 60);
+
+      // Labels
+      ctx.font = 'bold 12px Arial';
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.textAlign = 'left'; ctx.fillText('YOU', 25, H - 10);
+      ctx.textAlign = 'right'; ctx.fillText('CPU', W - 25, H - 10);
+
+      // Paddles
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = '#fff'; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.roundRect(25, playerY - PADDLE_H / 2, PADDLE_W, PADDLE_H, 4); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(W - 25 - PADDLE_W, cpuY - PADDLE_H / 2, PADDLE_W, PADDLE_H, 4); ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Ball
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = '#fff'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(ballX, ballY, BALL_R, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Serve countdown
+      if (serving) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+        ctx.fillText(serveTimer > 40 ? '3' : serveTimer > 20 ? '2' : '1', W / 2, H / 2 + 8);
+      }
+
+      // Rally indicator
+      if (rally > 3) {
+        ctx.fillStyle = `rgba(251,191,36,${0.3 + Math.sin(Date.now() * 0.005) * 0.15})`;
+        ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+        ctx.fillText(`Rally: ${rally}`, W / 2, H - 10);
+      }
+
+      // Game over overlay
+      if (!running) {
+        ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 32px Arial';
+        ctx.fillStyle = winner === 'YOU' ? '#4ade80' : '#ef4444';
+        ctx.fillText('GAME OVER', W / 2, H / 2 - 30);
+        ctx.font = 'bold 22px Arial'; ctx.fillStyle = '#fff';
+        ctx.fillText(winner === 'YOU' ? 'You Win!' : 'CPU Wins', W / 2, H / 2 + 8);
+        ctx.font = 'bold 14px Arial'; ctx.fillStyle = '#94a3b8';
+        ctx.fillText(`${playerScore} - ${cpuScore}`, W / 2, H / 2 + 36);
+      }
+    };
+
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+      canvas.removeEventListener('touchmove', onTouch);
+      canvas.removeEventListener('touchstart', onTouch);
+      canvas.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [gameKey]);
+
+  return (
+    <div className="flex flex-col items-center gap-3 p-4">
+      <div className="flex items-center justify-between w-full max-w-[600px]">
+        <p className="text-white font-bold text-sm">🏓 Pong</p>
+        <p className="text-yellow-300 font-bold text-sm">Wins: {wins}</p>
+      </div>
+      <canvas ref={canvasRef} className="rounded-xl shadow-lg w-full max-w-[600px] touch-none cursor-pointer" style={{ aspectRatio: '600/440' }} />
+      <div className="flex gap-3 md:hidden">
+        <button onPointerDown={() => { playerInputRef.current = -1; }} onPointerUp={() => { playerInputRef.current = 0; }} onPointerLeave={() => { playerInputRef.current = 0; }} className="bg-white/20 active:bg-white/40 text-white rounded-lg px-6 py-3 font-bold text-lg select-none">↑</button>
+        <button onPointerDown={() => { playerInputRef.current = 1; }} onPointerUp={() => { playerInputRef.current = 0; }} onPointerLeave={() => { playerInputRef.current = 0; }} className="bg-white/20 active:bg-white/40 text-white rounded-lg px-6 py-3 font-bold text-lg select-none">↓</button>
+      </div>
+      {phase === 'over' && (
+        <div className="flex gap-3">
+          <button onClick={() => { setPhase('playing'); setGameKey(k => k + 1); }} className="px-5 py-2 bg-green-500 text-white rounded-xl font-bold text-sm shadow">Play Again</button>
+          <button onClick={onExit} className="px-5 py-2 bg-white/20 text-white rounded-xl font-bold text-sm">Back</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ═══════ GAME INSTRUCTIONS ═══════
 function getGameInstructions(mode: GameMode): Record<string, { title: string; emoji: string; lines: string[] }> {
   const is2P = mode === '2p';
@@ -4980,19 +6342,21 @@ function getGameInstructions(mode: GameMode): Record<string, { title: string; em
         'CPU bats after you — play defense!',
       ],
     },
-    basketball: {
-      title: 'Basketball',
-      emoji: '🏀',
+    bowling: {
+      title: 'Bowling',
+      emoji: '🎳',
       lines: is2P ? [
-        'Both players: Click to shoot',
-        'Click when the power bar is in the green zone',
-        'P1 and P2 take turns shooting',
-        'Score the most points before time runs out',
+        'P1 and P2 take turns bowling',
+        'Click 1: Set position (left/right)',
+        'Click 2: Set power',
+        'Click 3: Set spin (center = straight)',
+        '10 frames — knock down all 10 pins!',
       ] : [
-        'Click to start the power meter',
-        'Click again when the bar is in the green zone',
-        'Take turns shooting with the CPU',
-        'Score the most points before time runs out',
+        'Click to set your lane position',
+        'Click again to set power',
+        'Click once more to set spin',
+        'Aim for strikes and spares!',
+        '10 frames — highest score wins',
       ],
     },
     boxing: {
@@ -5203,15 +6567,19 @@ export default function WiiSports({ onBack }: Props) {
             <h1 className="text-white font-bold text-lg">🕹️ Arcade</h1>
           </div>
         </div>
-        <div className="flex flex-col items-center justify-center gap-4 p-8 pt-16">
-          <button onClick={() => setArcadeGame('snake')} className="w-full max-w-xs px-6 py-6 bg-white/90 rounded-2xl text-center hover:scale-105 active:scale-95 transition-transform shadow-lg">
-            <span className="text-4xl block mb-2">🐍</span>
-            <span className="font-bold text-gray-800 text-lg">Snake</span>
-          </button>
-          <button onClick={() => setArcadeGame('pacman')} className="w-full max-w-xs px-6 py-6 bg-white/90 rounded-2xl text-center hover:scale-105 active:scale-95 transition-transform shadow-lg">
-            <span className="text-4xl block mb-2">👻</span>
-            <span className="font-bold text-gray-800 text-lg">Pac-Man</span>
-          </button>
+        <div className="grid grid-cols-2 gap-3 p-6 pt-12 max-w-sm mx-auto">
+          {([
+            { id: 'basketball' as ArcadeGame, emoji: '🏀', name: 'Basketball' },
+            { id: 'breakout' as ArcadeGame, emoji: '🧱', name: 'Breakout' },
+            { id: 'pong' as ArcadeGame, emoji: '🏓', name: 'Pong' },
+            { id: 'snake' as ArcadeGame, emoji: '🐍', name: 'Snake' },
+            { id: 'pacman' as ArcadeGame, emoji: '👻', name: 'Pac-Man' },
+          ] as { id: ArcadeGame; emoji: string; name: string }[]).map(g => (
+            <button key={g.id} onClick={() => setArcadeGame(g.id)} className="px-4 py-5 bg-white/90 rounded-2xl text-center hover:scale-105 active:scale-95 transition-transform shadow-lg">
+              <span className="text-3xl block mb-1">{g.emoji}</span>
+              <span className="font-bold text-gray-800 text-sm">{g.name}</span>
+            </button>
+          ))}
         </div>
       </div>
     );
@@ -5228,7 +6596,11 @@ export default function WiiSports({ onBack }: Props) {
             </button>
           </div>
         </div>
-        {arcadeGame === 'snake' ? <SnakeGame onExit={() => setArcadeGame(null)} /> : <PacManGame onExit={() => setArcadeGame(null)} />}
+        {arcadeGame === 'snake' && <SnakeGame onExit={() => setArcadeGame(null)} />}
+        {arcadeGame === 'pacman' && <PacManGame onExit={() => setArcadeGame(null)} />}
+        {arcadeGame === 'basketball' && <Basketball difficulty="medium" gameMode="1p" onExit={() => setArcadeGame(null)} />}
+        {arcadeGame === 'breakout' && <BreakoutGame onExit={() => setArcadeGame(null)} />}
+        {arcadeGame === 'pong' && <PongGame onExit={() => setArcadeGame(null)} />}
       </div>
     );
   }
@@ -5251,8 +6623,8 @@ export default function WiiSports({ onBack }: Props) {
             </div>
           </div>
         </div>
+        {sport === 'bowling' && <Bowling difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
         {sport === 'baseball' && <Baseball difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
-        {sport === 'basketball' && <Basketball difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
         {sport === 'boxing' && <Boxing difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
         {sport === 'tennis' && <Tennis difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
         {sport === 'golf' && <Golf difficulty={difficulty} gameMode={gameMode} onExit={exitGame} />}
