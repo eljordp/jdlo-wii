@@ -173,24 +173,24 @@ export default function WiiApp() {
             ))}
           </div>
 
-          {/* Mobile: all 8 in a tight 2x4 grid */}
-          <div className="md:hidden grid grid-cols-2 gap-2 w-full">
+          {/* Mobile: all 8 — grid stretches to fill available space */}
+          <div className="md:hidden grid grid-cols-2 grid-rows-4 gap-1.5 w-full flex-1">
             {channelTiles.map((tile, i) => (
               <motion.button
                 key={tile.id}
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.03 + i * 0.03, duration: 0.25 }}
-                className="channel-tile flex flex-col items-center justify-center gap-1 py-2"
+                className="channel-tile flex flex-col items-center justify-center gap-0.5 min-h-0"
                 style={{ animation: 'wii-float 3s ease-in-out infinite', animationDelay: `${i * 0.35}s` }}
                 onClick={() => setOpenChannel(tile.id)}
               >
                 {tile.icon === 'profile' ? (
-                  <img src={PROFILE_PHOTO} alt="Profile" className="w-10 h-13 object-cover object-top relative z-[3] drop-shadow-md" style={{ borderRadius: '3px' }} />
+                  <img src={PROFILE_PHOTO} alt="Profile" className="w-9 h-12 object-cover object-top relative z-[3] drop-shadow-md" style={{ borderRadius: '3px' }} />
                 ) : (
-                  <span className="text-3xl relative z-[3] drop-shadow-md">{tile.icon}</span>
+                  <span className="text-[28px] relative z-[3] drop-shadow-md">{tile.icon}</span>
                 )}
-                <span className="text-[8px] font-bold tracking-wider relative z-[3]" style={{ color: '#7a8a96', textShadow: '0 1px 0 rgba(255,255,255,0.7)', ...(isPokemon ? { fontSize: '6px', letterSpacing: '0.05em' } : {}) }}>{tile.name}</span>
+                <span className="text-[7px] font-bold tracking-wider relative z-[3]" style={{ color: '#7a8a96', textShadow: '0 1px 0 rgba(255,255,255,0.7)', ...(isPokemon ? { fontSize: '6px', letterSpacing: '0.05em' } : {}) }}>{tile.name}</span>
               </motion.button>
             ))}
           </div>
